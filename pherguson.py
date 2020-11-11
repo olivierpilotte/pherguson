@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 import ueberzug.lib.v0 as ueberzug
 
 
+stop_thread = False
+
 TYPE_MAP = {
     # canonical types
     "0": "txt",  # text file
