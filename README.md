@@ -1,4 +1,4 @@
-Pherguson: Gopher client
+Pherguson: Proof of concept Gopher client using Urwid and Ueberzug.
 
 Installation:
 ```

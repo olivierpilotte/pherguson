@@ -327,7 +327,7 @@ class ContentWindow(urwid.ListBox):
                         stop_thread = False
                         break
 
-                    time.sleep(0.2)
+                    time.sleep(0.1)
 
         x = threading.Thread(target=thread_function, args=(image_path, x, y))
         x.start()
