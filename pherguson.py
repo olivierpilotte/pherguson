@@ -145,7 +145,7 @@ class ContentWindow(urwid.ListBox):
         self.walker = urwid.SimpleFocusListWalker([])
         super(ContentWindow, self).__init__(self.walker)
 
-        self.image_preview = False
+        self.image_preview = None
 
         self.direction = "up"
 
@@ -227,7 +227,28 @@ class ContentWindow(urwid.ListBox):
                 highlighted_line.base_widget.set_text(highlighted_line.old_text)
                 self.walker.pop(self.current_highlight + 1)
 
-                self.image_preview = False
+                self.image_preview = None
+
+            if key in ["l", "right", "enter"]:
+                line = self.gopher.current_location_map[self.current_highlight]
+
+                if line.type in ["img", "gif"]:
+                    program = "feh"
+                    os.system(f"{program} {self.image_preview} > /dev/null 2>&1")
+
+                if line.type == "htm":
+                    url = line.url.replace("URL:", "")
+                    if platform.system() == "Linux":
+                        if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
+                            program = "feh"
+                        else:
+                            program = "qute"
+
+                    elif platform.system() == "Darwin":
+                        program = "open"
+
+                    os.system(f"{program} {url} > /dev/null 2>&1")
+                    return
 
             return
 
@@ -339,7 +360,7 @@ class ContentWindow(urwid.ListBox):
 
             img_width, img_height = img.size
 
-        self.image_preview = True
+        self.image_preview = filename
         self.walker.insert(self.current_highlight + 1, Box(img_height))
         self.display_image(filename, 0, self.current_highlight + 4)
         return
@@ -609,7 +630,7 @@ class Gopher():
             ("dir", "light blue", urwid.DEFAULT),
             ("txt", "light blue", urwid.DEFAULT),
             ("htm", "light blue", urwid.DEFAULT),
-            ("htm_img", "yellow", urwid.DEFAULT),
+            ("htm_img", "light green", urwid.DEFAULT),
             ("ask", "light blue", urwid.DEFAULT),
 
             # ui elements
