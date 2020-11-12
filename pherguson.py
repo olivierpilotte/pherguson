@@ -131,7 +131,7 @@ class Box(urwid.Pile):
     def __init__(self, pixels, *args, **kwargs):
         content = []
 
-        for i in range(int(pixels / 17)):
+        for i in range(int(pixels / 14)):
             content.append(urwid.Text(""))
 
         super(Box, self).__init__(content)
@@ -235,7 +235,7 @@ class ContentWindow(urwid.ListBox):
 
                 if line.type in ["img", "gif"]:
                     program = "feh"
-                    os.system(f"{program} {self.image_preview} > /dev/null 2>&1")
+                    os.system(f"{program} {self.image_preview[0]} > /dev/null 2>&1")
 
                 if line.type == "htm":
                     url = line.url.replace("URL:", "")
@@ -302,6 +302,9 @@ class ContentWindow(urwid.ListBox):
             except Exception:
                 pass
 
+        if key in ["r"]:
+            self.gopher.crawl()
+
         if key in ["i"]:
             with open("/tmp/pherguson.log", "a+") as f:
                 for line in self.gopher.current_location_map:
@@ -351,19 +354,24 @@ class ContentWindow(urwid.ListBox):
         highlighted_line.base_widget.set_text(f"- {highlighted_line.old_text[2:]}")
 
         img = Image.open(filename)
-        img_width, img_height = img.size
 
-        if img_width > 500:
-            basewidth = 500
-            wpercent = (basewidth / float(img.size[0]))
-            hsize = int((float(img.size[1]) * float(wpercent)))
-            img = img.resize((basewidth, hsize), Image.ANTIALIAS)
+        thumbnail_size = 384, 384
+        img.thumbnail(thumbnail_size)
+        thumbnail_filename, thumbnail_extension = os.path.splitext(filename)
+        with open("/tmp/pherguson.log", "a+") as f:
+            f.write(f"{thumbnail_filename}-thumbnail{thumbnail_extension}")
 
-            img_width, img_height = img.size
+        thumbnail_filename = f"{thumbnail_filename}-thumbnail{thumbnail_extension}"
+        img.save(thumbnail_filename)
+        img.close()
 
-        self.image_preview = filename
-        self.walker.insert(self.current_highlight + 1, Box(img_height))
-        self.display_image(filename, 0, self.current_highlight + 4)
+        thumbnail = Image.open(thumbnail_filename)
+        thumbnail_width, thumbnail_height = thumbnail.size
+        thumbnail.close()
+
+        self.image_preview = filename, thumbnail_filename
+        self.walker.insert(self.current_highlight + 1, Box(thumbnail_height))
+        self.display_image(thumbnail_filename, 0, self.current_highlight + 4)
         return
 
     def display_image(self, image_path, x, y):
