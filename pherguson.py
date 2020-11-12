@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 
 import os
 import platform
@@ -432,7 +433,7 @@ class UrlBar(urwid.Columns):
         self.url_edit.base_widget.set_edit_pos(len(edit_text))
 
     def keypress(self, size, key):
-        if key == "tab":
+        if key in ["tab", "esc"]:
             self.gopher.window.focus_position = "body"
 
         if key == 'enter':
