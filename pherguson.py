@@ -1,6 +1,8 @@
 
 import os
 import platform
+import requests
+import shutil
 import socket
 import threading
 import time
@@ -36,6 +38,9 @@ TYPE_MAP = {
     "s": "snd",  # sound file
 }
 SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask"]
+
+
+download_cache = {}
 
 
 class Line:
@@ -102,10 +107,11 @@ class Highlight(urwid.AttrMap):
 
 
 class Selectable(urwid.WidgetWrap):
-    def __init__(self, text, type, *args, **kwargs):
+    def __init__(self, text, type, expandable=False, *args, **kwargs):
         self.text = text
 
-        if type in ["img", "gif"]:
+        # if type in ["img", "gif"]:
+        if expandable:
             self.text = f"+ {self.text}"
 
         self.attr_map = urwid.AttrMap(urwid.Text(self.text), type)
@@ -150,13 +156,24 @@ class ContentWindow(urwid.ListBox):
             self.walker.pop()
 
     def set_content(self, lines, focus):
+        def _is_expandable(url):
+            url = url.lower()
+            return "jpg" in url or "jpeg" in url or "png" in url or "gif" in url
+
         for line in lines:
             selectable = line.type in SELECTABLES
+            expandable = _is_expandable(line.url)
+
+            type = line.type
+
+            if expandable and line.type == "htm":
+                type = "htm_img"
+
             formatted_text = f"{line.type.upper() if selectable else ''}{' ' if selectable else ''}{line.text}"
             self.walker.append(
-                Selectable(formatted_text, line.type)
+                Selectable(formatted_text, type, expandable=expandable)
                 if selectable else
-                Unselectable(formatted_text, line.type)
+                Unselectable(formatted_text, type)
             )
 
         if focus > len(self.walker):
@@ -231,8 +248,14 @@ class ContentWindow(urwid.ListBox):
             if line.type == "htm":
                 url = line.url.replace("URL:", "")
 
+                # if the url contains an image, display the image inline
+                if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
+                    self.display_image_inline(line)
+                    return
+
+                # if not displaying images inline, check the os and use external program
                 if platform.system() == "Linux":
-                    if "jpg" in url or "jpeg" in url or "png" in url:
+                    if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
                         program = "feh"
                     else:
                         program = "qute"
@@ -244,27 +267,7 @@ class ContentWindow(urwid.ListBox):
                 return
 
             if line.type in ["img", "gif"]:
-                filename = self.gopher.download(line.host, line.port, line.url)
-                highlighted_line = self.walker[self.current_highlight]
-
-                self.old_line = highlighted_line
-                highlighted_line.old_text = highlighted_line.base_widget.get_text()[0]
-                highlighted_line.base_widget.set_text(f"- {highlighted_line.old_text[2:]}")
-
-                img = Image.open(filename)
-                img_width, img_height = img.size
-
-                if img_width > 500:
-                    basewidth = 500
-                    wpercent = (basewidth / float(img.size[0]))
-                    hsize = int((float(img.size[1]) * float(wpercent)))
-                    img = img.resize((basewidth, hsize), Image.ANTIALIAS)
-
-                    img_width, img_height = img.size
-
-                self.image_preview = True
-                self.walker.insert(self.current_highlight + 1, Box(img_height))
-                self.display_image(filename, 0, self.current_highlight + 4)
+                self.display_image_inline(line)
                 return
 
             try:
@@ -309,6 +312,37 @@ class ContentWindow(urwid.ListBox):
 
         if key in ["q", "ctrl c"]:
             raise urwid.ExitMainLoop()
+
+    def display_image_inline(self, line):
+        url = line.url.replace("URL:", "")
+
+        if url.startswith("http"):
+            filename = self.gopher.download_http(url)
+
+        else:
+            filename = self.gopher.download(line.host, line.port, line.url)
+
+        highlighted_line = self.walker[self.current_highlight]
+
+        self.old_line = highlighted_line
+        highlighted_line.old_text = highlighted_line.base_widget.get_text()[0]
+        highlighted_line.base_widget.set_text(f"- {highlighted_line.old_text[2:]}")
+
+        img = Image.open(filename)
+        img_width, img_height = img.size
+
+        if img_width > 500:
+            basewidth = 500
+            wpercent = (basewidth / float(img.size[0]))
+            hsize = int((float(img.size[1]) * float(wpercent)))
+            img = img.resize((basewidth, hsize), Image.ANTIALIAS)
+
+            img_width, img_height = img.size
+
+        self.image_preview = True
+        self.walker.insert(self.current_highlight + 1, Box(img_height))
+        self.display_image(filename, 0, self.current_highlight + 4)
+        return
 
     def display_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
@@ -491,20 +525,48 @@ class Gopher():
 
         return lines
 
+    def download_http(self, url):
+        download_directory = "/tmp"
+        filename = url.split('/')[-1]
+        download_location = f"{download_directory}/{filename}"
+
+        if url in download_cache:
+            self.status_bar.set(f"using downloaded file: {download_cache[url]}")
+            return download_cache[url]
+
+        response = requests.get(url, stream=True)
+
+        if response.status_code == 200:
+            response.raw.decode_content = True
+
+            with open(download_location, "wb") as f:
+                shutil.copyfileobj(response.raw, f)
+
+        self.status_bar.set(f"downloaded: {download_location}")
+
+        download_cache[url] = download_location
+        return download_location
+
     def download(self, host, port, url):
         download_directory = "/tmp"
         filename = url.split('/')[-1]
+        download_location = f"{download_directory}/{filename}"
+
+        if url in download_cache:
+            self.status_bar.set(f"using downloaded file: {download_cache[url]}")
+            return download_cache[url]
 
         self.status_bar.set(f"downloading {filename}")
         s = self._get_bytes(host, port, url)
         f = s.makefile("rb")
 
-        download_location = f"{download_directory}/{filename}"
         with open(download_location, "wb") as file:
             file.write(f.read())
 
         s.close()
         self.status_bar.set(f"downloaded: {download_location}")
+
+        download_cache[url] = download_location
         return download_location
 
     def _parse_line(self, line):
@@ -547,6 +609,7 @@ class Gopher():
             ("dir", "light blue", urwid.DEFAULT),
             ("txt", "light blue", urwid.DEFAULT),
             ("htm", "light blue", urwid.DEFAULT),
+            ("htm_img", "yellow", urwid.DEFAULT),
             ("ask", "light blue", urwid.DEFAULT),
 
             # ui elements
