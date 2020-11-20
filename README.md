@@ -2,6 +2,7 @@
 Proof of concept [Gopher Protocol](https://en.wikipedia.org/wiki/Gopher_(protocol)) client using [Urwid](http://urwid.org/) and [Ueberzug](https://github.com/seebye/ueberzug).
 
 ## Installation
+### Linux
 ```bash
 git clone https://github.com/olivierpilotte/pherguson
 cd pherguson
@@ -12,6 +13,14 @@ or using a virtual environment:
 ```bash
 venv .venv
 .venv/bin/pip install -r requirements.txt
+```
+
+### MacOs
+Install [XQuartz](https://www.xquartz.org/)
+
+```bash
+sudo ARCHFLAGS="-arch x86_64" LDFLAGS="-L/opt/X11/lib -lX11 -lpthread" CPPFLAGS="-I/opt/X11/include" pip3 install ueberzug
+sudo pip3 install -r requirements.txt
 ```
 
 ## Run

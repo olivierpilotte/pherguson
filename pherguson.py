@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
+import hashlib
 import os
+import pathlib
 import platform
 import requests
 import shutil
@@ -15,7 +17,9 @@ from urllib.parse import urlparse
 import ueberzug.lib.v0 as ueberzug
 
 
-stop_thread = False
+STOP_THREAD = False
+THUMBNAIL_SIZE = (384, 256)
+INLINE_IMAGES_ENABLED = platform.system() == "Linux"
 
 TYPE_MAP = {
     # canonical types
@@ -41,7 +45,22 @@ TYPE_MAP = {
 SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask"]
 
 
-download_cache = {}
+class Cache():
+    cache_directory = f"{os.path.expanduser('~')}/.config/pherguson/cache"
+
+    @classmethod
+    def get_cache_directory(cls, host):
+        hash = hashlib.md5(host.encode()).hexdigest()
+
+        dir = f"{cls.cache_directory}/{hash}"
+        path = pathlib.Path(dir)
+        path.mkdir(parents=True, exist_ok=True)
+
+        return dir
+
+    @classmethod
+    def file_exists(cls, file_path):
+        return pathlib.Path(file_path).is_file()
 
 
 class Line:
@@ -128,13 +147,11 @@ class Unselectable(Selectable):
 
 
 class Box(urwid.Pile):
-    def __init__(self, pixels, *args, **kwargs):
-        content = []
-
-        for i in range(int(pixels / 14)):
-            content.append(urwid.Text(""))
-
-        super(Box, self).__init__(content)
+    def __init__(self, pixels, row_height=15, *args, **kwargs):
+        super(Box, self).__init__([
+            urwid.Text("")
+            for i in range(int(pixels / row_height))
+        ])
 
     def selectable(self):
         return False
@@ -147,9 +164,6 @@ class ContentWindow(urwid.ListBox):
         super(ContentWindow, self).__init__(self.walker)
 
         self.image_preview = None
-
-        self.direction = "up"
-
         self.current_highlight = None
 
     def clear(self):
@@ -159,6 +173,9 @@ class ContentWindow(urwid.ListBox):
     def set_content(self, lines, focus):
         def _is_expandable(url):
             url = url.lower()
+            if not INLINE_IMAGES_ENABLED:
+                return False
+
             return "jpg" in url or "jpeg" in url or "png" in url or "gif" in url
 
         for line in lines:
@@ -219,10 +236,10 @@ class ContentWindow(urwid.ListBox):
             self.gopher.status_bar.set(url)
 
     def keypress(self, size, key):
-        if self.image_preview:
+        if INLINE_IMAGES_ENABLED and self.image_preview:
             if key in ["h", "left", "q", "esc"]:
-                global stop_thread
-                stop_thread = True
+                global STOP_THREAD
+                STOP_THREAD = True
 
                 highlighted_line = self.walker[self.current_highlight]
                 highlighted_line.base_widget.set_text(highlighted_line.old_text)
@@ -235,6 +252,8 @@ class ContentWindow(urwid.ListBox):
 
                 if line.type in ["img", "gif"]:
                     program = "feh"
+
+                    self.gopher.status_bar.set(f"open: {self.image_preview[0]}")
                     os.system(f"{program} {self.image_preview[0]} > /dev/null 2>&1")
 
                 if line.type == "htm":
@@ -258,7 +277,9 @@ class ContentWindow(urwid.ListBox):
             walkable = line.type not in ["txt"]
 
             if line.type == "ask":
-                widget = urwid.Filler(urwid.AttrMap(Ask(self.gopher, line), "ask_box"))
+                widget = urwid.Filler(
+                    urwid.AttrMap(SearchOverlay(self.gopher, line), "search_overlay"))
+
                 overlay = urwid.Overlay(
                     widget, self.gopher.main_loop.widget,
                     "center", 30, valign="middle", height=3)
@@ -270,26 +291,32 @@ class ContentWindow(urwid.ListBox):
             if line.type == "htm":
                 url = line.url.replace("URL:", "")
 
-                # if the url contains an image, display the image inline
-                if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
+                if INLINE_IMAGES_ENABLED:
+                    if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
+                        self.display_image_inline(line)
+                        return
+
+                else:
+                    if platform.system() == "Linux":
+                        program = "xdg-open"
+
+                        if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
+                            program = "feh"
+
+                    elif platform.system() == "Darwin":
+                        program = "open"
+
+                    os.system(f"{program} {url} > /dev/null 2>&1")
+                    return
+
+            if line.type in ["img", "gif"]:
+                if INLINE_IMAGES_ENABLED:
                     self.display_image_inline(line)
                     return
 
-                # if not displaying images inline, check the os and use external program
-                if platform.system() == "Linux":
-                    if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
-                        program = "feh"
-                    else:
-                        program = "qute"
-
-                elif platform.system() == "Darwin":
-                    program = "open"
-
-                os.system(f"{program} {url} > /dev/null 2>&1")
-                return
-
-            if line.type in ["img", "gif"]:
-                self.display_image_inline(line)
+                file_path = self.gopher.download(line.host, line.port, line.url)
+                program = "feh"
+                os.system(f"{program} {file_path} > /dev/null 2>&1")
                 return
 
             try:
@@ -336,7 +363,13 @@ class ContentWindow(urwid.ListBox):
             self.set_highlight(history.current_location.focus)
 
         if key in ["q", "ctrl c"]:
-            raise urwid.ExitMainLoop()
+            widget = urwid.Filler(urwid.AttrMap(ExitOverlay(self.gopher), "exit_overlay"))
+            overlay = urwid.Overlay(
+                widget, self.gopher.main_loop.widget,
+                "center", 27, valign="middle", height=3)
+
+            self.gopher.main_loop.widget = overlay
+            return
 
     def display_image_inline(self, line):
         url = line.url.replace("URL:", "")
@@ -355,8 +388,7 @@ class ContentWindow(urwid.ListBox):
 
         img = Image.open(filename)
 
-        thumbnail_size = 384, 384
-        img.thumbnail(thumbnail_size)
+        img.thumbnail(THUMBNAIL_SIZE)
         thumbnail_filename, thumbnail_extension = os.path.splitext(filename)
         with open("/tmp/pherguson.log", "a+") as f:
             f.write(f"{thumbnail_filename}-thumbnail{thumbnail_extension}")
@@ -376,7 +408,7 @@ class ContentWindow(urwid.ListBox):
 
     def display_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
-            global stop_thread
+            global STOP_THREAD
             with ueberzug.Canvas() as c:
                 paths = [image_path]
                 placement = c.create_placement("image", x=x, y=y, scaler=ueberzug.ScalerOption.FIT_CONTAIN.value, width=50)
@@ -387,8 +419,8 @@ class ContentWindow(urwid.ListBox):
                     with c.synchronous_lazy_drawing:
                         placement.path = paths[0]
 
-                    if stop_thread:
-                        stop_thread = False
+                    if STOP_THREAD:
+                        STOP_THREAD = False
                         break
 
                     time.sleep(0.1)
@@ -397,12 +429,12 @@ class ContentWindow(urwid.ListBox):
         x.start()
 
 
-class Ask(urwid.Edit):
+class SearchOverlay(urwid.Edit):
 
     def __init__(self, gopher, line):
         self.line = line
         self.gopher = gopher
-        super(Ask, self).__init__(caption="Ask: ")
+        super(SearchOverlay, self).__init__(caption="Search: ")
 
     def keypress(self, size, key):
         if key == "enter":
@@ -416,7 +448,22 @@ class Ask(urwid.Edit):
         if key == "esc":
             self.gopher.main_loop.widget = self.gopher.window
 
-        super(Ask, self).keypress(size, key)
+        super(SearchOverlay, self).keypress(size, key)
+
+
+class ExitOverlay(urwid.Edit):
+
+    def __init__(self, gopher):
+        self.gopher = gopher
+        super(ExitOverlay, self).__init__(caption="really exit? (press 'q'): ")
+
+    def keypress(self, size, key):
+        if key == "q":
+            raise urwid.ExitMainLoop()
+
+        else:
+            self.gopher.main_loop.widget = self.gopher.window
+            return
 
 
 class UrlBar(urwid.Columns):
@@ -556,48 +603,51 @@ class Gopher():
         return lines
 
     def download_http(self, url):
-        download_directory = "/tmp"
-        filename = url.split('/')[-1]
-        download_location = f"{download_directory}/{filename}"
+        parsed_url = urlparse(url)
+        download_directory = Cache.get_cache_directory(parsed_url.netloc)
 
-        if url in download_cache:
-            self.status_bar.set(f"using downloaded file: {download_cache[url]}")
-            return download_cache[url]
+        filename = url.split('/')[-1]
+        file_path = f"{download_directory}/{filename}"
+
+        if Cache.file_exists(file_path):
+            self.status_bar.set(f"using cache: {file_path}")
+            return file_path
 
         response = requests.get(url, stream=True)
 
         if response.status_code == 200:
             response.raw.decode_content = True
 
-            with open(download_location, "wb") as f:
+            with open(file_path, "wb") as f:
                 shutil.copyfileobj(response.raw, f)
 
-        self.status_bar.set(f"downloaded: {download_location}")
+        self.status_bar.set(f"downloaded: {file_path}")
 
-        download_cache[url] = download_location
-        return download_location
+        return file_path
 
     def download(self, host, port, url):
-        download_directory = "/tmp"
+        download_directory = Cache.get_cache_directory(host)
         filename = url.split('/')[-1]
-        download_location = f"{download_directory}/{filename}"
 
-        if url in download_cache:
-            self.status_bar.set(f"using downloaded file: {download_cache[url]}")
-            return download_cache[url]
+        file_path = f"{download_directory}/{filename}"
+
+        if Cache.file_exists(file_path):
+            self.status_bar.set(f"using cache: {file_path}")
+            return file_path
+
+        file_path = f"{download_directory}/{filename}"
 
         self.status_bar.set(f"downloading {filename}")
         s = self._get_bytes(host, port, url)
         f = s.makefile("rb")
 
-        with open(download_location, "wb") as file:
+        with open(file_path, "wb") as file:
             file.write(f.read())
 
         s.close()
-        self.status_bar.set(f"downloaded: {download_location}")
+        self.status_bar.set(f"downloaded: {file_path}")
 
-        download_cache[url] = download_location
-        return download_location
+        return file_path
 
     def _parse_line(self, line):
         text = line[0] if len(line) > 0 else ""
@@ -647,7 +697,8 @@ class Gopher():
             ("url_bar", "white", urwid.DEFAULT),
             ("selection", "white", "dark blue"),
             ("divider", "light blue", urwid.DEFAULT),
-            ("ask_box", "white", "dark blue"),
+            ("search_overlay", "white", "dark blue"),
+            ("exit_overlay", "white", "dark red"),
             ("list", urwid.DEFAULT, urwid.DEFAULT),
 
             # status bar levels
