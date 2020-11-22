@@ -157,6 +157,14 @@ class Box(urwid.Pile):
         return False
 
 
+def is_image(url):
+    for image_type in ["jpg", "jpeg", "png", "gif"]:
+        if image_type in url.lower():
+            return True
+
+    return False
+
+
 class ContentWindow(urwid.ListBox):
     def __init__(self, gopher):
         self.gopher = gopher
@@ -176,7 +184,7 @@ class ContentWindow(urwid.ListBox):
             if not INLINE_IMAGES_ENABLED:
                 return False
 
-            return "jpg" in url or "jpeg" in url or "png" in url or "gif" in url
+            return is_image(url)
 
         for line in lines:
             selectable = line.type in SELECTABLES
@@ -259,7 +267,7 @@ class ContentWindow(urwid.ListBox):
                 if line.type == "htm":
                     url = line.url.replace("URL:", "")
                     if platform.system() == "Linux":
-                        if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
+                        if is_image(url):
                             program = "feh"
                         else:
                             program = "qute"
@@ -291,16 +299,15 @@ class ContentWindow(urwid.ListBox):
             if line.type == "htm":
                 url = line.url.replace("URL:", "")
 
-                if INLINE_IMAGES_ENABLED:
-                    if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
-                        self.display_image_inline(line)
-                        return
+                if INLINE_IMAGES_ENABLED and is_image(url):
+                    self.display_image_inline(line)
+                    return
 
                 else:
                     if platform.system() == "Linux":
                         program = "xdg-open"
 
-                        if "jpg" in url or "jpeg" in url or "png" in url or "gif" in url:
+                        if is_image(url):
                             program = "feh"
 
                     elif platform.system() == "Darwin":
