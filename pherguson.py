@@ -21,6 +21,32 @@ STOP_THREAD = False
 THUMBNAIL_SIZE = (384, 256)
 INLINE_IMAGES_ENABLED = platform.system() == "Linux"
 
+COLOR_MAP = [
+    # gopher types
+    ("inf", "white", urwid.DEFAULT),
+    ("gif", "yellow", urwid.DEFAULT),
+    ("img", "yellow", urwid.DEFAULT),
+    ("dir", "light blue", urwid.DEFAULT),
+    ("txt", "light blue", urwid.DEFAULT),
+    ("htm", "light blue", urwid.DEFAULT),
+    ("htm_img", "light green", urwid.DEFAULT),
+    ("ask", "light blue", urwid.DEFAULT),
+
+    # ui elements
+    ("url_label", "light blue", urwid.DEFAULT),
+    ("url_bar", "white", urwid.DEFAULT),
+    ("selection", "white", "dark blue"),
+    ("divider", "light blue", urwid.DEFAULT),
+    ("search_overlay", "white", "dark blue"),
+    ("exit_overlay", "white", "dark red"),
+    ("list", urwid.DEFAULT, urwid.DEFAULT),
+
+    # status bar levels
+    ("ok", "light green", urwid.DEFAULT),
+    ("warning", "yellow", urwid.DEFAULT),
+    ("error", "light red", urwid.DEFAULT),
+]
+
 TYPE_MAP = {
     # canonical types
     "0": "txt",  # text file
@@ -129,8 +155,6 @@ class Highlight(urwid.AttrMap):
 class Selectable(urwid.WidgetWrap):
     def __init__(self, text, type, expandable=False, *args, **kwargs):
         self.text = text
-
-        # if type in ["img", "gif"]:
         if expandable:
             self.text = f"+ {self.text}"
 
@@ -498,7 +522,7 @@ class UrlBar(urwid.Columns):
         if key in ["tab", "esc"]:
             self.gopher.window.focus_position = "body"
 
-        if key == 'enter':
+        if key == "enter":
             url = self.url_edit.base_widget.get_edit_text()
             if self.scheme not in url:
                 url = f"{self.scheme}{url}"
@@ -506,6 +530,7 @@ class UrlBar(urwid.Columns):
             url = urlparse(url)
             host, port = url.netloc.split(":") if ":" in url.netloc else (url.netloc, 70)
 
+            history.current_location.focus = self.gopher.content_window.current_highlight
             history.forward(host, port, url.path)
             self.gopher.crawl()
 
@@ -582,10 +607,7 @@ class Gopher():
             raise Error(f"error while connecting to {host}:{port}")
 
     def get_content(self, host, port, url):
-        tab = "\t"
-
         s = self._get_bytes(host, port, url)
-
         f = s.makefile("r")
 
         lines = []
@@ -599,14 +621,13 @@ class Gopher():
                 if line == ".":
                     break
 
-                lines.append([part.strip('\n') for part in line.split(tab)])
+                lines.append([part.strip('\n') for part in line.split("\t")])
             except Exception:
                 pass
 
         s.close()
 
         self.url_bar.set_url(history.current_location)
-
         return lines
 
     def download_http(self, url):
@@ -617,7 +638,7 @@ class Gopher():
         file_path = f"{download_directory}/{filename}"
 
         if Cache.file_exists(file_path):
-            self.status_bar.set(f"using cache: {file_path}")
+            self.status_bar.set(f"cached: {file_path}")
             return file_path
 
         response = requests.get(url, stream=True)
@@ -629,7 +650,6 @@ class Gopher():
                 shutil.copyfileobj(response.raw, f)
 
         self.status_bar.set(f"downloaded: {file_path}")
-
         return file_path
 
     def download(self, host, port, url):
@@ -637,14 +657,12 @@ class Gopher():
         filename = url.split('/')[-1]
 
         file_path = f"{download_directory}/{filename}"
-
         if Cache.file_exists(file_path):
-            self.status_bar.set(f"using cache: {file_path}")
+            self.status_bar.set(f"cached: {file_path}")
             return file_path
 
-        file_path = f"{download_directory}/{filename}"
+        self.status_bar.set(f"downloading: {filename}")
 
-        self.status_bar.set(f"downloading {filename}")
         s = self._get_bytes(host, port, url)
         f = s.makefile("rb")
 
@@ -688,33 +706,7 @@ class Gopher():
             # self.crawl()
 
     def run(self):
-        palette = [
-            # gopher types
-            ("inf", "white", urwid.DEFAULT),
-            ("gif", "yellow", urwid.DEFAULT),
-            ("img", "yellow", urwid.DEFAULT),
-            ("dir", "light blue", urwid.DEFAULT),
-            ("txt", "light blue", urwid.DEFAULT),
-            ("htm", "light blue", urwid.DEFAULT),
-            ("htm_img", "light green", urwid.DEFAULT),
-            ("ask", "light blue", urwid.DEFAULT),
-
-            # ui elements
-            ("url_label", "light blue", urwid.DEFAULT),
-            ("url_bar", "white", urwid.DEFAULT),
-            ("selection", "white", "dark blue"),
-            ("divider", "light blue", urwid.DEFAULT),
-            ("search_overlay", "white", "dark blue"),
-            ("exit_overlay", "white", "dark red"),
-            ("list", urwid.DEFAULT, urwid.DEFAULT),
-
-            # status bar levels
-            ("ok", "light green", urwid.DEFAULT),
-            ("warning", "yellow", urwid.DEFAULT),
-            ("error", "light red", urwid.DEFAULT),
-        ]
-
-        self.main_loop = urwid.MainLoop(self.window, palette=palette)
+        self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP)
         self.main_loop.run()
 
 
