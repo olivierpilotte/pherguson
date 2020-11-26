@@ -9,17 +9,17 @@ import shutil
 import socket
 import threading
 import time
+import ueberzug.lib.v0 as ueberzug
 import urwid
 
 from PIL import Image
 from urllib.parse import urlparse
 
-import ueberzug.lib.v0 as ueberzug
-
 USE_BOLD_FONT = True
 STOP_THREAD = False
 THUMBNAIL_SIZE = (384, 256)
 INLINE_IMAGES_ENABLED = platform.system() == "Linux"
+APPLICATION_HANDLER = "xdg-open" if platform.system() == "Linux" else "open"
 
 COLOR_MAP = [
     # gopher types
@@ -283,23 +283,12 @@ class ContentWindow(urwid.ListBox):
                 line = self.gopher.current_location_map[self.current_highlight]
 
                 if line.type in ["img", "gif"]:
-                    program = "feh"
-
                     self.gopher.status_bar.set_status(f"open: {self.image_preview[0]}")
-                    os.system(f"{program} {self.image_preview[0]} > /dev/null 2>&1")
+                    os.system(f"{APPLICATION_HANDLER} {self.image_preview[0]} > /dev/null 2>&1")
 
                 if line.type == "htm":
                     url = line.url.replace("URL:", "")
-                    if platform.system() == "Linux":
-                        if is_image(url):
-                            program = "feh"
-                        else:
-                            program = "qute"
-
-                    elif platform.system() == "Darwin":
-                        program = "open"
-
-                    os.system(f"{program} {url} > /dev/null 2>&1")
+                    os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
                     return
 
             return
@@ -312,9 +301,9 @@ class ContentWindow(urwid.ListBox):
                 widget = urwid.Filler(
                     urwid.AttrMap(SearchOverlay(self.gopher, line), "search_overlay"))
 
-                overlay = urwid.Overlay(
+                overlay = urwid.AttrMap(urwid.Overlay(
                     widget, self.gopher.main_loop.widget,
-                    "center", 30, valign="middle", height=3)
+                    "center", 50, valign="middle", height=3), "search_overlay")
 
                 history.current_location.focus = self.current_highlight
                 self.gopher.main_loop.widget = overlay
@@ -328,16 +317,7 @@ class ContentWindow(urwid.ListBox):
                     return
 
                 else:
-                    if platform.system() == "Linux":
-                        program = "xdg-open"
-
-                        if is_image(url):
-                            program = "feh"
-
-                    elif platform.system() == "Darwin":
-                        program = "open"
-
-                    os.system(f"{program} {url} > /dev/null 2>&1")
+                    os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
                     return
 
             if line.type in ["img", "gif"]:
@@ -346,8 +326,8 @@ class ContentWindow(urwid.ListBox):
                     return
 
                 file_path = self.gopher.download(line.host, line.port, line.url)
-                program = "feh"
-                os.system(f"{program} {file_path} > /dev/null 2>&1")
+                self.gopher.status_bar.set_status("YEAH")
+                os.system(f"{APPLICATION_HANDLER} {file_path}")
                 return
 
             try:
@@ -395,9 +375,9 @@ class ContentWindow(urwid.ListBox):
 
         if key in ["q", "ctrl c"]:
             widget = urwid.Filler(urwid.AttrMap(ExitOverlay(self.gopher), "exit_overlay"))
-            overlay = urwid.Overlay(
+            overlay = urwid.AttrMap(urwid.Overlay(
                 widget, self.gopher.main_loop.widget,
-                "center", 27, valign="middle", height=3)
+                "center", 50, valign="middle", height=3), "exit_overlay")
 
             self.gopher.main_loop.widget = overlay
             return
@@ -434,10 +414,10 @@ class ContentWindow(urwid.ListBox):
 
         self.image_preview = filename, thumbnail_filename
         self.walker.insert(self.current_highlight + 1, Box(thumbnail_height))
-        self.display_image(thumbnail_filename, 0, self.current_highlight + 4)
+        self.preview_image(thumbnail_filename, 0, self.current_highlight + 4)
         return
 
-    def display_image(self, image_path, x, y):
+    def preview_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
             global STOP_THREAD
             with ueberzug.Canvas() as c:
@@ -465,7 +445,7 @@ class SearchOverlay(urwid.Edit):
     def __init__(self, gopher, line):
         self.line = line
         self.gopher = gopher
-        super(SearchOverlay, self).__init__(caption="Search: ")
+        super(SearchOverlay, self).__init__(caption=" Search: ")
 
     def keypress(self, size, key):
         if key == "enter":
@@ -486,7 +466,7 @@ class ExitOverlay(urwid.Edit):
 
     def __init__(self, gopher):
         self.gopher = gopher
-        super(ExitOverlay, self).__init__(caption="really exit? (press 'q'): ")
+        super(ExitOverlay, self).__init__(caption="really exit? (press 'q'): ", align="center")
 
     def keypress(self, size, key):
         if key == "q":
