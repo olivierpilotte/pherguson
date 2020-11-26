@@ -16,35 +16,35 @@ from urllib.parse import urlparse
 
 import ueberzug.lib.v0 as ueberzug
 
-
+USE_BOLD_FONT = True
 STOP_THREAD = False
 THUMBNAIL_SIZE = (384, 256)
 INLINE_IMAGES_ENABLED = platform.system() == "Linux"
 
 COLOR_MAP = [
     # gopher types
-    ("inf", "white", urwid.DEFAULT),
-    ("gif", "yellow", urwid.DEFAULT),
-    ("img", "yellow", urwid.DEFAULT),
-    ("dir", "light blue", urwid.DEFAULT),
-    ("txt", "light blue", urwid.DEFAULT),
-    ("htm", "light blue", urwid.DEFAULT),
-    ("htm_img", "light green", urwid.DEFAULT),
-    ("ask", "light blue", urwid.DEFAULT),
+    ("inf", f"{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("gif", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("img", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("dir", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("txt", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("htm", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("htm_img", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("ask", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 
     # ui elements
     ("url_label", "light blue", urwid.DEFAULT),
-    ("url_bar", "white", urwid.DEFAULT),
-    ("selection", "white", "dark blue"),
+    ("url_bar", f"{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT, "bold"),
+    ("selection", f"light gray{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
     ("divider", "light blue", urwid.DEFAULT),
     ("search_overlay", "white", "dark blue"),
-    ("exit_overlay", "white", "dark red"),
+    ("exit_overlay", f"{',bold' if USE_BOLD_FONT else ''}", "dark red"),
     ("list", urwid.DEFAULT, urwid.DEFAULT),
 
     # status bar levels
-    ("ok", "light green", urwid.DEFAULT),
-    ("warning", "yellow", urwid.DEFAULT),
-    ("error", "light red", urwid.DEFAULT),
+    ("ok", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("warning", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("error", f"dark red{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 ]
 
 TYPE_MAP = {
@@ -265,7 +265,7 @@ class ContentWindow(urwid.ListBox):
             else:
                 url = f"gopher://{location.host}{location.url}"
 
-            self.gopher.status_bar.set(url)
+            self.gopher.status_bar.set_status(url)
 
     def keypress(self, size, key):
         if INLINE_IMAGES_ENABLED and self.image_preview:
@@ -285,7 +285,7 @@ class ContentWindow(urwid.ListBox):
                 if line.type in ["img", "gif"]:
                     program = "feh"
 
-                    self.gopher.status_bar.set(f"open: {self.image_preview[0]}")
+                    self.gopher.status_bar.set_status(f"open: {self.image_preview[0]}")
                     os.system(f"{program} {self.image_preview[0]} > /dev/null 2>&1")
 
                 if line.type == "htm":
@@ -546,7 +546,7 @@ class StatusBar(urwid.WidgetWrap):
         self.attr = urwid.AttrMap(urwid.Text("status", align="right"), "ok")
         super(StatusBar, self).__init__(self.attr)
 
-    def set(self, message, level="ok"):
+    def set_status(self, message, level="ok"):
         self.attr.base_widget.set_text(message)
         self.attr = urwid.AttrMap(urwid.Text(message, align="right"), level)
         super(StatusBar, self).__init__(self.attr)
@@ -638,7 +638,7 @@ class Gopher():
         file_path = f"{download_directory}/{filename}"
 
         if Cache.file_exists(file_path):
-            self.status_bar.set(f"cached: {file_path}")
+            self.status_bar.set_status(f"cached: {file_path}")
             return file_path
 
         response = requests.get(url, stream=True)
@@ -649,7 +649,7 @@ class Gopher():
             with open(file_path, "wb") as f:
                 shutil.copyfileobj(response.raw, f)
 
-        self.status_bar.set(f"downloaded: {file_path}")
+        self.status_bar.set_status(f"downloaded: {file_path}")
         return file_path
 
     def download(self, host, port, url):
@@ -658,10 +658,10 @@ class Gopher():
 
         file_path = f"{download_directory}/{filename}"
         if Cache.file_exists(file_path):
-            self.status_bar.set(f"cached: {file_path}")
+            self.status_bar.set_status(f"cached: {file_path}")
             return file_path
 
-        self.status_bar.set(f"downloading: {filename}")
+        self.status_bar.set_status(f"downloading: {filename}")
 
         s = self._get_bytes(host, port, url)
         f = s.makefile("rb")
@@ -670,7 +670,7 @@ class Gopher():
             file.write(f.read())
 
         s.close()
-        self.status_bar.set(f"downloaded: {file_path}")
+        self.status_bar.set_status(f"downloaded: {file_path}")
 
         return file_path
 
@@ -700,10 +700,10 @@ class Gopher():
             self.content_window.set_content(lines, location.focus)
 
         except Error as e:
-            self.status_bar.set(e.message, level="error")
+            self.status_bar.set_status(e.message, level="error")
 
             history.back()
-            # self.crawl()
+            self.crawl()
 
     def run(self):
         self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP)
