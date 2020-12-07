@@ -37,7 +37,8 @@ COLOR_MAP = [
     ("url_bar", f"{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT, "bold"),
     ("selection", f"light gray{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
     ("divider", "light blue", urwid.DEFAULT),
-    ("search_overlay", "white", "dark blue"),
+    ("search_overlay", f"white{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
+    ("download_overlay", f"white{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
     ("exit_overlay", f"{',bold' if USE_BOLD_FONT else ''}", "dark red"),
     ("list", urwid.DEFAULT, urwid.DEFAULT),
 
@@ -289,6 +290,9 @@ class ContentWindow(urwid.ListBox):
             return
 
         if key in ["l", "right", "enter"]:
+            if not history.current_location.walkable:
+                return
+
             line = self.gopher.current_location_map[self.current_highlight]
             walkable = line.type not in ["txt"]
 
@@ -320,9 +324,7 @@ class ContentWindow(urwid.ListBox):
                     self.display_image_inline(line)
                     return
 
-                file_path = self.gopher.download(
-                    line.location.host, line.location.port, line.location.url)
-
+                file_path = self.gopher.download(line.location)
                 os.system(f"{APPLICATION_HANDLER} {file_path}")
                 return
 
@@ -379,6 +381,22 @@ class ContentWindow(urwid.ListBox):
             self.gopher.main_loop.widget = exit_overlay
             return
 
+        if key in ["d"]:
+            if history.current_location.walkable:
+                line = self.gopher.current_location_map[self.current_highlight]
+                location = line.location
+
+            else:
+                location = history.current_location
+
+            widget = urwid.Filler(urwid.AttrMap(DownloadOverlay(self.gopher, location), "download_overlay"))
+            download_overlay = urwid.AttrMap(urwid.Overlay(
+                widget, self.gopher.main_loop.widget,
+                "center", 70, valign="middle", height=3), "download_overlay")
+
+            self.gopher.main_loop.widget = download_overlay
+            return
+
     def display_image_inline(self, line):
         url = line.location.url.replace("URL:", "")
 
@@ -386,8 +404,7 @@ class ContentWindow(urwid.ListBox):
             filename = self.gopher.download_http(url)
 
         else:
-            filename = self.gopher.download(
-                line.location.host, line.location.port, line.location.url)
+            filename = self.gopher.download(line.location)
 
         highlighted_line = self.walker[self.current_highlight]
 
@@ -443,7 +460,7 @@ class SearchOverlay(urwid.Edit):
         super(SearchOverlay, self).__init__(caption=" Search: ")
 
     def keypress(self, size, key):
-        if key == "enter":
+        if key in ["enter"]:
             query = self.get_edit_text()
             history.forward(self.line.location.host, self.line.location.port,
                             f"{self.line.location.url}\t{query}")
@@ -451,10 +468,30 @@ class SearchOverlay(urwid.Edit):
             self.gopher.main_loop.widget = self.gopher.window
             self.gopher.crawl()
 
-        if key == "esc":
+        if key in ["esc"]:
             self.gopher.main_loop.widget = self.gopher.window
 
         super(SearchOverlay, self).keypress(size, key)
+
+
+class DownloadOverlay(urwid.Edit):
+    def __init__(self, gopher, location):
+        self.gopher = gopher
+        self.location = location
+        self.filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
+        super(DownloadOverlay, self).__init__(
+            caption=" download location: ", edit_text=self.filename,
+            align="left")
+
+    def keypress(self, size, key):
+        if key in ["enter"]:
+            self.gopher.download(self.location, self.filename)
+            self.gopher.main_loop.widget = self.gopher.window
+
+        if key in ["esc"]:
+            self.gopher.main_loop.widget = self.gopher.window
+
+        super(DownloadOverlay, self).keypress(size, key)
 
 
 class ExitOverlay(urwid.Edit):
@@ -565,15 +602,15 @@ class Gopher():
     def status_bar(self):
         return self._status_bar.base_widget
 
-    def _get_bytes(self, host, port, url):
+    def _get_bytes(self, location):
         crlf = "\r\n"
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(5)
 
         try:
-            s.connect((host, port))
-            s.send(str.encode(url) + str.encode(crlf))
+            s.connect((location.host, location.port))
+            s.send(str.encode(location.url) + str.encode(crlf))
             s.shutdown(1)
 
             return s
@@ -581,8 +618,8 @@ class Gopher():
         except (ConnectionRefusedError, socket.gaierror):
             raise Error(f"error connecting to {host}:{port}")
 
-    def get_content(self, host, port, url):
-        s = self._get_bytes(host, port, url)
+    def get_content(self, location):
+        s = self._get_bytes(location)
         f = s.makefile("r")
 
         lines = []
@@ -627,18 +664,19 @@ class Gopher():
         self.status_bar.set_status(f"downloaded: {file_path}")
         return file_path
 
-    def download(self, host, port, url):
-        download_directory = Cache.get_cache_directory(host)
-        filename = url.split('/')[-1]
+    def download(self, location, file_path=None):
+        filename = location.url.split('/')[-1]
+        if not file_path:
+            download_directory = Cache.get_cache_directory(location.host)
 
-        file_path = f"{download_directory}/{filename}"
-        if Cache.file_exists(file_path):
-            self.status_bar.set_status(f"cached: {file_path}")
-            return file_path
+            file_path = f"{download_directory}/{filename}"
+            if Cache.file_exists(file_path):
+                self.status_bar.set_status(f"cached: {file_path}")
+                return file_path
 
         self.status_bar.set_status(f"downloading: {filename}")
 
-        s = self._get_bytes(host, port, url)
+        s = self._get_bytes(location)
         f = s.makefile("rb")
 
         with open(file_path, "wb") as file:
@@ -666,7 +704,7 @@ class Gopher():
         try:
             location = history.current_location
 
-            content = self.get_content(location.host, location.port, location.url)
+            content = self.get_content(location)
             lines = [self._parse_line(line) for line in content]
 
             self.current_location_map = lines
