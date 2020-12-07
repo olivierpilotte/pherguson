@@ -31,6 +31,7 @@ COLOR_MAP = [
     ("htm", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("htm_img", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("ask", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("bin", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 
     # ui elements
     ("url_label", "light blue", urwid.DEFAULT),
@@ -69,7 +70,8 @@ TYPE_MAP = {
     "i": "inf",  # info message
     "s": "snd",  # sound file
 }
-SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask"]
+SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask", "bin"]
+BINARIES = ["txt", "bin"]
 
 
 class Cache:
@@ -96,6 +98,9 @@ class Line:
         self.text = text
         self.location = location
 
+    def __repr__(self):
+        return f"{self.type}\t{self.text}\t{self.location}\n"
+
 
 class Location:
     def __init__(self, host, port, url, focus=0, walkable=True):
@@ -105,6 +110,9 @@ class Location:
 
         self.focus = focus
         self.walkable = walkable
+
+    def __repr__(self):
+        return f"gopher://{self.host}:{self.port}{self.url}"
 
 
 class Error(Exception):
@@ -294,7 +302,7 @@ class ContentWindow(urwid.ListBox):
                 return
 
             line = self.gopher.current_location_map[self.current_highlight]
-            walkable = line.type not in ["txt"]
+            walkable = line.type not in BINARIES
 
             if line.type == "ask":
                 widget = urwid.Filler(
@@ -346,7 +354,7 @@ class ContentWindow(urwid.ListBox):
                 for line in self.gopher.current_location_map:
                     f.writelines(str(line))
 
-        if key in ["tab", "ctrl l"]:
+        if key in ["tab", "ctrl l", ":"]:
             self.gopher.window.focus_position = "header"
 
         if key in ["j", "J", "up", "page up", "k", "K", "down", "page down"]:
@@ -381,7 +389,7 @@ class ContentWindow(urwid.ListBox):
             self.gopher.main_loop.widget = exit_overlay
             return
 
-        if key in ["d"]:
+        if key in ["d", "o"]:
             if history.current_location.walkable:
                 line = self.gopher.current_location_map[self.current_highlight]
                 location = line.location
@@ -389,13 +397,20 @@ class ContentWindow(urwid.ListBox):
             else:
                 location = history.current_location
 
-            widget = urwid.Filler(urwid.AttrMap(DownloadOverlay(self.gopher, location), "download_overlay"))
-            download_overlay = urwid.AttrMap(urwid.Overlay(
-                widget, self.gopher.main_loop.widget,
-                "center", 70, valign="middle", height=3), "download_overlay")
+            if key in ["d"]:
+                widget = urwid.Filler(urwid.AttrMap(DownloadOverlay(self.gopher, location), "download_overlay"))
+                download_overlay = urwid.AttrMap(urwid.Overlay(
+                    widget, self.gopher.main_loop.widget,
+                    "center", 70, valign="middle", height=3), "download_overlay")
 
-            self.gopher.main_loop.widget = download_overlay
-            return
+                self.gopher.main_loop.widget = download_overlay
+                return
+
+            if key in ["o"]:
+                filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
+                self.gopher.download(location, filename)
+                self.gopher.status_bar.set_status(f"opening: {filename}")
+                os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
 
     def display_image_inline(self, line):
         url = line.location.url.replace("URL:", "")
@@ -564,7 +579,7 @@ class StatusBar(urwid.WidgetWrap):
         super(StatusBar, self).__init__(self.attr)
 
 
-class Gopher():
+class Gopher:
 
     def __init__(self):
         self._url_bar = urwid.AttrMap(UrlBar(self), "url")
@@ -602,7 +617,7 @@ class Gopher():
     def status_bar(self):
         return self._status_bar.base_widget
 
-    def _get_bytes(self, location):
+    def _get_socket(self, location):
         crlf = "\r\n"
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -619,7 +634,7 @@ class Gopher():
             raise Error(f"error connecting to {host}:{port}")
 
     def get_content(self, location):
-        s = self._get_bytes(location)
+        s = self._get_socket(location)
         f = s.makefile("r")
 
         lines = []
@@ -629,8 +644,6 @@ class Gopher():
                 if not line:
                     break
                 if line == "":
-                    break
-                if line == ".":
                     break
 
                 lines.append([part.strip('\n') for part in line.split("\t")])
@@ -676,7 +689,7 @@ class Gopher():
 
         self.status_bar.set_status(f"downloading: {filename}")
 
-        s = self._get_bytes(location)
+        s = self._get_socket(location)
         f = s.makefile("rb")
 
         with open(file_path, "wb") as file:
@@ -704,6 +717,8 @@ class Gopher():
         try:
             location = history.current_location
 
+            self.status_bar.set_status(f"loading: {location}")
+
             content = self.get_content(location)
             lines = [self._parse_line(line) for line in content]
 
@@ -719,7 +734,10 @@ class Gopher():
             self.crawl()
 
     def run(self):
-        self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP)
+        screen = urwid.raw_display.Screen()
+        screen.set_terminal_properties(256)
+
+        self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP, screen=screen)
         self.main_loop.run()
 
 

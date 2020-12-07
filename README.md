@@ -56,10 +56,14 @@ To open the image in an external program (e.g. `feh`), press any of the Forward 
 
 To collapse the image, press any of the `Back` navigation keys or `Escape`.
 
+### Downloading and opening files externally
+Download a file: `d`\
+Open a file in an external program: `o`
+
 ## Todo:
 * refactor the code (it's a mess)
 * better handling of sockets
 * browser cache (specifically for images)
 * history overlay
 * bookmarks
-* proper "homepage" (offline)
+* proper "homepage" (landing page, offline)
