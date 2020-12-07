@@ -15,7 +15,7 @@ import urwid
 from PIL import Image
 from urllib.parse import urlparse
 
-USE_BOLD_FONT = True
+USE_BOLD_FONT = False
 STOP_THREAD = False
 THUMBNAIL_SIZE = (384, 256)
 INLINE_IMAGES_ENABLED = platform.system() == "Linux"
@@ -28,7 +28,7 @@ COLOR_MAP = [
     ("img", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("dir", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("txt", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
-    ("htm", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("htm", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("htm_img", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("ask", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 
@@ -71,7 +71,7 @@ TYPE_MAP = {
 SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask"]
 
 
-class Cache():
+class Cache:
     cache_directory = f"{os.path.expanduser('~')}/.config/pherguson/cache"
 
     @classmethod
@@ -90,15 +90,10 @@ class Cache():
 
 
 class Line:
-    def __init__(self, type, text, url, host, port):
+    def __init__(self, type, text, location):
         self.type = type
         self.text = text
-        self.url = url
-        self.host = host
-        self.port = port
-
-    def __repr__(self):
-        return f"{self.type}\t{self.text}\t{self.url}\t{self.host}\t{self.port}\n"
+        self.location = location
 
 
 class Location:
@@ -212,7 +207,7 @@ class ContentWindow(urwid.ListBox):
 
         for line in lines:
             selectable = line.type in SELECTABLES
-            expandable = _is_expandable(line.url)
+            expandable = _is_expandable(line.location.url)
 
             type = line.type
 
@@ -233,10 +228,10 @@ class ContentWindow(urwid.ListBox):
             self.set_focus(0)
 
         else:
-            # find first selectable element
             if len(self.walker) < 1:
                 return
 
+            # find first selectable element
             while not self.walker[focus].base_widget.selectable() and focus < len(self.walker) - 1:
                 focus += 1
 
@@ -258,12 +253,12 @@ class ContentWindow(urwid.ListBox):
             self.body[focus] = Highlight(self.body[focus])
             self.current_highlight = focus
 
-            location = self.gopher.current_location_map[focus]
-            if "URL" in location.url:
-                url = location.url.replace("URL:", "")
+            line = self.gopher.current_location_map[focus]
+            if "URL" in line.location.url:
+                url = line.location.url.replace("URL:", "")
 
             else:
-                url = f"gopher://{location.host}{location.url}"
+                url = f"gopher://{line.location.host}{line.location.url}"
 
             self.gopher.status_bar.set_status(url)
 
@@ -287,7 +282,7 @@ class ContentWindow(urwid.ListBox):
                     os.system(f"{APPLICATION_HANDLER} {self.image_preview[0]} > /dev/null 2>&1")
 
                 if line.type == "htm":
-                    url = line.url.replace("URL:", "")
+                    url = line.location.url.replace("URL:", "")
                     os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
                     return
 
@@ -301,16 +296,16 @@ class ContentWindow(urwid.ListBox):
                 widget = urwid.Filler(
                     urwid.AttrMap(SearchOverlay(self.gopher, line), "search_overlay"))
 
-                overlay = urwid.AttrMap(urwid.Overlay(
+                search_overlay = urwid.AttrMap(urwid.Overlay(
                     widget, self.gopher.main_loop.widget,
                     "center", 50, valign="middle", height=3), "search_overlay")
 
                 history.current_location.focus = self.current_highlight
-                self.gopher.main_loop.widget = overlay
+                self.gopher.main_loop.widget = search_overlay
                 return
 
             if line.type == "htm":
-                url = line.url.replace("URL:", "")
+                url = line.location.url.replace("URL:", "")
 
                 if INLINE_IMAGES_ENABLED and is_image(url):
                     self.display_image_inline(line)
@@ -325,14 +320,15 @@ class ContentWindow(urwid.ListBox):
                     self.display_image_inline(line)
                     return
 
-                file_path = self.gopher.download(line.host, line.port, line.url)
-                self.gopher.status_bar.set_status("YEAH")
+                file_path = self.gopher.download(
+                    line.location.host, line.location.port, line.location.url)
+
                 os.system(f"{APPLICATION_HANDLER} {file_path}")
                 return
 
             try:
                 history.current_location.focus = self.current_highlight
-                history.forward(line.host, line.port, line.url)
+                history.forward(line.location.host, line.location.port, line.location.url)
                 history.current_location.walkable = walkable
 
                 self.gopher.crawl()
@@ -364,6 +360,7 @@ class ContentWindow(urwid.ListBox):
                 self.base_widget._keypress_page_up(size)
 
             new_focus = self.get_focus()[1]
+            history.current_location.focus = new_focus
 
             if self.walker[new_focus].base_widget.selectable():
                 self.set_highlight(new_focus)
@@ -375,21 +372,22 @@ class ContentWindow(urwid.ListBox):
 
         if key in ["q", "ctrl c"]:
             widget = urwid.Filler(urwid.AttrMap(ExitOverlay(self.gopher), "exit_overlay"))
-            overlay = urwid.AttrMap(urwid.Overlay(
+            exit_overlay = urwid.AttrMap(urwid.Overlay(
                 widget, self.gopher.main_loop.widget,
                 "center", 50, valign="middle", height=3), "exit_overlay")
 
-            self.gopher.main_loop.widget = overlay
+            self.gopher.main_loop.widget = exit_overlay
             return
 
     def display_image_inline(self, line):
-        url = line.url.replace("URL:", "")
+        url = line.location.url.replace("URL:", "")
 
         if url.startswith("http"):
             filename = self.gopher.download_http(url)
 
         else:
-            filename = self.gopher.download(line.host, line.port, line.url)
+            filename = self.gopher.download(
+                line.location.host, line.location.port, line.location.url)
 
         highlighted_line = self.walker[self.current_highlight]
 
@@ -420,28 +418,25 @@ class ContentWindow(urwid.ListBox):
     def preview_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
             global STOP_THREAD
-            with ueberzug.Canvas() as c:
-                paths = [image_path]
-                placement = c.create_placement("image", x=x, y=y, scaler=ueberzug.ScalerOption.FIT_CONTAIN.value, width=50)
-                placement.path = paths[0]
-                placement.visibility = ueberzug.Visibility.VISIBLE
+            with ueberzug.Canvas() as canvas:
+                canvas.create_placement(
+                    "image", x=x, y=y, width=50,
+                    scaler=ueberzug.ScalerOption.FIT_CONTAIN.value,
+                    visibility=ueberzug.Visibility.VISIBLE,
+                    path=image_path)
 
                 while True:
-                    with c.synchronous_lazy_drawing:
-                        placement.path = paths[0]
-
                     if STOP_THREAD:
                         STOP_THREAD = False
                         break
 
-                    time.sleep(0.1)
+                    time.sleep(0.01)
 
         x = threading.Thread(target=thread_function, args=(image_path, x, y))
         x.start()
 
 
 class SearchOverlay(urwid.Edit):
-
     def __init__(self, gopher, line):
         self.line = line
         self.gopher = gopher
@@ -450,8 +445,8 @@ class SearchOverlay(urwid.Edit):
     def keypress(self, size, key):
         if key == "enter":
             query = self.get_edit_text()
-
-            history.forward(self.line.host, self.line.port, f"{self.line.url}\t{query}")
+            history.forward(self.line.location.host, self.line.location.port,
+                            f"{self.line.location.url}\t{query}")
 
             self.gopher.main_loop.widget = self.gopher.window
             self.gopher.crawl()
@@ -463,10 +458,10 @@ class SearchOverlay(urwid.Edit):
 
 
 class ExitOverlay(urwid.Edit):
-
     def __init__(self, gopher):
         self.gopher = gopher
-        super(ExitOverlay, self).__init__(caption="really exit? (press 'q'): ", align="center")
+        super(ExitOverlay, self).__init__(
+            caption="really exit? (press 'q'): ", align="center")
 
     def keypress(self, size, key):
         if key == "q":
@@ -584,7 +579,7 @@ class Gopher():
             return s
 
         except (ConnectionRefusedError, socket.gaierror):
-            raise Error(f"error while connecting to {host}:{port}")
+            raise Error(f"error connecting to {host}:{port}")
 
     def get_content(self, host, port, url):
         s = self._get_bytes(host, port, url)
@@ -665,7 +660,7 @@ class Gopher():
             line_type = TYPE_MAP.get(text[0], "inf")
             text = text[1:]
 
-        return Line(line_type, text, url, host, port)
+        return Line(line_type, text, Location(host, port, url))
 
     def crawl(self):
         try:
