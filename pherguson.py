@@ -15,11 +15,13 @@ import urwid
 from PIL import Image
 from urllib.parse import urlparse
 
+DEFAULT_ROW_HEIGHT = 15
 USE_BOLD_FONT = False
 STOP_THREAD = False
 THUMBNAIL_SIZE = (384, 256)
 INLINE_IMAGES_ENABLED = platform.system() == "Linux"
 APPLICATION_HANDLER = "xdg-open" if platform.system() == "Linux" else "open"
+HOME_DIRECTORY = os.path.expanduser("~")
 
 COLOR_MAP = [
     # gopher types
@@ -32,6 +34,7 @@ COLOR_MAP = [
     ("htm_img", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("ask", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("bin", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("snd", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 
     # ui elements
     ("url_label", "light blue", urwid.DEFAULT),
@@ -70,12 +73,20 @@ TYPE_MAP = {
     "i": "inf",  # info message
     "s": "snd",  # sound file
 }
-SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask", "bin"]
-BINARIES = ["txt", "bin"]
+SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask", "bin", "snd"]
+BINARIES = ["txt", "img", "gif", "bin"]
+
+LANDING_PAGE = [
+    ["i   P H E R G U S O N   "],
+    ["i"],
+    ["iPherguson is a gopher client"],
+    ["i"],
+    ["1Bookmarks"],
+]
 
 
 class Cache:
-    cache_directory = f"{os.path.expanduser('~')}/.config/pherguson/cache"
+    cache_directory = f"{HOME_DIRECTORY}/.config/pherguson/cache"
 
     @classmethod
     def get_cache_directory(cls, host):
@@ -126,6 +137,9 @@ class History:
 
     @property
     def current_location(self):
+        if len(self.history) == 0:
+            return Location(None, None, "LANDING")
+
         if len(self.history) == 1:
             return self.history[0]
 
@@ -175,7 +189,7 @@ class Unselectable(Selectable):
 
 
 class Box(urwid.Pile):
-    def __init__(self, pixels, row_height=15, *args, **kwargs):
+    def __init__(self, pixels, row_height=DEFAULT_ROW_HEIGHT, *args, **kwargs):
         super(Box, self).__init__([
             urwid.Text("")
             for i in range(int(pixels / row_height))
@@ -271,21 +285,130 @@ class ContentWindow(urwid.ListBox):
 
             self.gopher.status_bar.set_status(url)
 
+    def scroll(self):
+        new_focus = self.get_focus()[1]
+        history.current_location.focus = new_focus
+
+        if self.walker[new_focus].base_widget.selectable():
+            self.set_highlight(new_focus)
+
+    def forward(self, line):
+        try:
+            walkable = line.type not in BINARIES
+
+            history.current_location.focus = self.current_highlight
+            history.forward(line.location.host, line.location.port, line.location.url)
+            history.current_location.walkable = walkable
+
+            self.gopher.crawl()
+
+        except Exception as e:
+            self.gopher.status_bar.set_status(f"{e}")
+
+    def forward_htm(self, line):
+        url = line.location.url.replace("URL:", "")
+
+        if INLINE_IMAGES_ENABLED and is_image(url):
+            self.display_image_inline(line)
+
+        else:
+            os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
+
+    def back(self):
+        history.back()
+        self.gopher.crawl()
+        self.set_highlight(history.current_location.focus)
+
+    def quit(self):
+        widget = urwid.Filler(urwid.AttrMap(ExitOverlay(self.gopher), "exit_overlay"))
+        exit_overlay = urwid.AttrMap(urwid.Overlay(
+            widget, self.gopher.main_loop.widget,
+            "center", 50, valign="middle", height=3), "exit_overlay")
+
+        self.gopher.main_loop.widget = exit_overlay
+        return
+
+    def refresh(self):
+        self.gopher.crawl()
+
+    def ask(self, line):
+        widget = urwid.Filler(
+            urwid.AttrMap(SearchOverlay(self.gopher, line), "search_overlay"))
+
+        search_overlay = urwid.AttrMap(urwid.Overlay(
+            widget, self.gopher.main_loop.widget,
+            "center", 50, valign="middle", height=3), "search_overlay")
+
+        history.current_location.focus = self.current_highlight
+        self.gopher.main_loop.widget = search_overlay
+
+    def open_image_preview(self):
+        line = self.gopher.current_location_map[self.current_highlight]
+
+        if INLINE_IMAGES_ENABLED:
+            self.display_image_inline(line)
+
+        else:
+            file_path = self.gopher.download(line.location)
+            os.system(f"{APPLICATION_HANDLER} {file_path}")
+
+    def close_image_preview(self):
+        global STOP_THREAD
+        STOP_THREAD = True
+
+        highlighted_line = self.walker[self.current_highlight]
+
+        if hasattr(highlighted_line, "old_text"):
+            highlighted_line.base_widget.set_text(highlighted_line.old_text)
+
+        self.walker.pop(self.current_highlight + 1)
+
+        self.image_preview = None
+
+    def mouse_event(self, size, event, button, col, row, focus):
+        if INLINE_IMAGES_ENABLED and not self.image_preview:
+            if event == "mouse press":
+                if button == 4.0:
+                    self.base_widget._keypress_up(size)
+
+                if button == 5.0:
+                    self.base_widget._keypress_down(size)
+
+                self.scroll()
+
+        if event == "mouse release":
+            new_focus = self.get_focus()[1]
+            history.current_location.focus = new_focus
+
+            self.set_highlight(new_focus)
+
+            line = self.gopher.current_location_map[self.current_highlight]
+
+            if self.walker[new_focus].base_widget.selectable():
+                self.set_highlight(new_focus)
+
+            elif INLINE_IMAGES_ENABLED and self.image_preview:
+                self.close_image_preview()
+
+            elif line.type == "htm":
+                self.forward_htm(line)
+
+            elif line.type in ["img", "gif"]:
+                self.open_image_preview()
+
+            else:
+                self.forward(line)
+
+        super(ContentWindow, self).mouse_event(size, event, button, col, row, focus)
+
     def keypress(self, size, key):
+        line = self.gopher.current_location_map[self.current_highlight]
+
         if INLINE_IMAGES_ENABLED and self.image_preview:
             if key in ["h", "left", "q", "esc"]:
-                global STOP_THREAD
-                STOP_THREAD = True
-
-                highlighted_line = self.walker[self.current_highlight]
-                highlighted_line.base_widget.set_text(highlighted_line.old_text)
-                self.walker.pop(self.current_highlight + 1)
-
-                self.image_preview = None
+                self.close_image_preview()
 
             if key in ["l", "right", "enter"]:
-                line = self.gopher.current_location_map[self.current_highlight]
-
                 if line.type in ["img", "gif"]:
                     self.gopher.status_bar.set_status(f"open: {self.image_preview[0]}")
                     os.system(f"{APPLICATION_HANDLER} {self.image_preview[0]} > /dev/null 2>&1")
@@ -297,67 +420,36 @@ class ContentWindow(urwid.ListBox):
 
             return
 
-        if key in ["l", "right", "enter"]:
+        elif key in ["l", "right", "enter"]:
             if not history.current_location.walkable:
                 return
 
-            line = self.gopher.current_location_map[self.current_highlight]
-            walkable = line.type not in BINARIES
-
             if line.type == "ask":
-                widget = urwid.Filler(
-                    urwid.AttrMap(SearchOverlay(self.gopher, line), "search_overlay"))
+                self.ask(line)
 
-                search_overlay = urwid.AttrMap(urwid.Overlay(
-                    widget, self.gopher.main_loop.widget,
-                    "center", 50, valign="middle", height=3), "search_overlay")
+            elif line.type == "htm":
+                self.forward_htm(line)
 
-                history.current_location.focus = self.current_highlight
-                self.gopher.main_loop.widget = search_overlay
-                return
+            elif line.type in ["img", "gif"]:
+                self.open_image_preview()
 
-            if line.type == "htm":
-                url = line.location.url.replace("URL:", "")
+            else:
+                self.forward(line)
 
-                if INLINE_IMAGES_ENABLED and is_image(url):
-                    self.display_image_inline(line)
-                    return
+            return
 
-                else:
-                    os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
-                    return
+        elif key in ["r"]:
+            self.refresh()
 
-            if line.type in ["img", "gif"]:
-                if INLINE_IMAGES_ENABLED:
-                    self.display_image_inline(line)
-                    return
-
-                file_path = self.gopher.download(line.location)
-                os.system(f"{APPLICATION_HANDLER} {file_path}")
-                return
-
-            try:
-                history.current_location.focus = self.current_highlight
-                history.forward(line.location.host, line.location.port, line.location.url)
-                history.current_location.walkable = walkable
-
-                self.gopher.crawl()
-
-            except Exception:
-                pass
-
-        if key in ["r"]:
-            self.gopher.crawl()
-
-        if key in ["i"]:
+        elif key in ["i"]:
             with open("/tmp/pherguson.log", "a+") as f:
                 for line in self.gopher.current_location_map:
                     f.writelines(str(line))
 
-        if key in ["tab", "ctrl l", ":"]:
+        elif key in ["tab", "ctrl l", ":"]:
             self.gopher.window.focus_position = "header"
 
-        if key in ["j", "J", "up", "page up", "k", "K", "down", "page down"]:
+        elif key in ["j", "J", "up", "page up", "k", "K", "down", "page down"]:
 
             if key in ["j", "down"]:
                 self.base_widget._keypress_down(size)
@@ -369,30 +461,21 @@ class ContentWindow(urwid.ListBox):
             if key in ["K", "page up"]:
                 self.base_widget._keypress_page_up(size)
 
-            new_focus = self.get_focus()[1]
-            history.current_location.focus = new_focus
+            self.scroll()
 
-            if self.walker[new_focus].base_widget.selectable():
-                self.set_highlight(new_focus)
+        elif key in ["h", "left", "backspace"]:
+            self.back()
 
-        if key in ["h", "left", "backspace"]:
-            history.back()
-            self.gopher.crawl()
-            self.set_highlight(history.current_location.focus)
+        elif key in ["q", "ctrl c"]:
+            self.quit()
 
-        if key in ["q", "ctrl c"]:
-            widget = urwid.Filler(urwid.AttrMap(ExitOverlay(self.gopher), "exit_overlay"))
-            exit_overlay = urwid.AttrMap(urwid.Overlay(
-                widget, self.gopher.main_loop.widget,
-                "center", 50, valign="middle", height=3), "exit_overlay")
-
-            self.gopher.main_loop.widget = exit_overlay
-            return
-
-        if key in ["d", "o"]:
+        elif key in ["d", "o"]:
             if history.current_location.walkable:
                 line = self.gopher.current_location_map[self.current_highlight]
                 location = line.location
+
+                if line.type not in BINARIES:
+                    return
 
             else:
                 location = history.current_location
@@ -406,9 +489,16 @@ class ContentWindow(urwid.ListBox):
                 self.gopher.main_loop.widget = download_overlay
                 return
 
-            if key in ["o"]:
+            elif key in ["o"]:
                 filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
-                self.gopher.download(location, filename)
+
+                if location.url.startswith("URL"):
+                    url = location.url.replace("URL:", "")
+                    self.gopher.download_http(url, filename)
+
+                else:
+                    self.gopher.download(location, filename)
+
                 self.gopher.status_bar.set_status(f"opening: {filename}")
                 os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
 
@@ -422,8 +512,6 @@ class ContentWindow(urwid.ListBox):
             filename = self.gopher.download(line.location)
 
         highlighted_line = self.walker[self.current_highlight]
-
-        self.old_line = highlighted_line
         highlighted_line.old_text = highlighted_line.base_widget.get_text()[0]
         highlighted_line.base_widget.set_text(f"- {highlighted_line.old_text[2:]}")
 
@@ -445,7 +533,6 @@ class ContentWindow(urwid.ListBox):
         self.image_preview = filename, thumbnail_filename
         self.walker.insert(self.current_highlight + 1, Box(thumbnail_height))
         self.preview_image(thumbnail_filename, 0, self.current_highlight + 4)
-        return
 
     def preview_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
@@ -464,8 +551,7 @@ class ContentWindow(urwid.ListBox):
 
                     time.sleep(0.01)
 
-        x = threading.Thread(target=thread_function, args=(image_path, x, y))
-        x.start()
+        threading.Thread(target=thread_function, args=(image_path, x, y)).start()
 
 
 class SearchOverlay(urwid.Edit):
@@ -500,7 +586,13 @@ class DownloadOverlay(urwid.Edit):
 
     def keypress(self, size, key):
         if key in ["enter"]:
-            self.gopher.download(self.location, self.filename)
+            if "URL" in self.location.url:
+                url = self.location.url.replace("URL:", "")
+                self.gopher.download_http(url, self.filename)
+
+            else:
+                self.gopher.download(self.location, self.filename)
+
             self.gopher.main_loop.widget = self.gopher.window
 
         if key in ["esc"]:
@@ -588,11 +680,11 @@ class Gopher:
 
         self.header_pile = urwid.Pile([
             self._url_bar,
-            urwid.AttrMap(urwid.Divider('─'), "divider")
+            urwid.AttrMap(urwid.Divider("─"), "divider")
         ])
 
         self.status_pile = urwid.Pile([
-            urwid.AttrMap(urwid.Divider('─'), "divider"),
+            urwid.AttrMap(urwid.Divider("─"), "divider"),
             self._status_bar
         ])
 
@@ -600,7 +692,7 @@ class Gopher:
             header=self.header_pile,
             body=self._content_window,
             footer=self.status_pile,
-            focus_part='body'
+            focus_part="body"
         )
 
         self.crawl()
@@ -631,41 +723,44 @@ class Gopher:
             return s
 
         except (ConnectionRefusedError, socket.gaierror):
-            raise Error(f"error connecting to {host}:{port}")
+            raise Error(f"error connecting to {location.host}:{location.port}")
 
     def get_content(self, location):
-        s = self._get_socket(location)
-        f = s.makefile("r")
+        sock = self._get_socket(location)
+        file = sock.makefile("r")
 
         lines = []
         while True:
             try:
-                line = f.readline()
+                line = file.readline()
                 if not line:
                     break
                 if line == "":
                     break
 
-                lines.append([part.strip('\n') for part in line.split("\t")])
+                lines.append([part.strip("\n") for part in line.split("\t")])
             except Exception:
                 pass
 
-        s.close()
+        sock.close()
 
         self.url_bar.set_url(history.current_location)
         return lines
 
-    def download_http(self, url):
+    def download_http(self, url, file_path=None):
         parsed_url = urlparse(url)
-        download_directory = Cache.get_cache_directory(parsed_url.netloc)
+        filename = url.split("/")[-1]
 
-        filename = url.split('/')[-1]
-        file_path = f"{download_directory}/{filename}"
+        if not file_path:
+            download_directory = Cache.get_cache_directory(parsed_url.netloc)
 
-        if Cache.file_exists(file_path):
-            self.status_bar.set_status(f"cached: {file_path}")
-            return file_path
+            file_path = f"{download_directory}/{filename}"
 
+            if Cache.file_exists(file_path):
+                self.status_bar.set_status(f"cached: {file_path.replace(HOME_DIRECTORY, '~')}")
+                return file_path
+
+        self.status_bar.set_status(f"downloading: {filename}")
         response = requests.get(url, stream=True)
 
         if response.status_code == 200:
@@ -678,13 +773,13 @@ class Gopher:
         return file_path
 
     def download(self, location, file_path=None):
-        filename = location.url.split('/')[-1]
+        filename = location.url.split("/")[-1]
         if not file_path:
             download_directory = Cache.get_cache_directory(location.host)
 
             file_path = f"{download_directory}/{filename}"
             if Cache.file_exists(file_path):
-                self.status_bar.set_status(f"cached: {file_path}")
+                self.status_bar.set_status(f"cached: {file_path.replace(HOME_DIRECTORY, '~')}")
                 return file_path
 
         self.status_bar.set_status(f"downloading: {filename}")
@@ -696,7 +791,7 @@ class Gopher:
             file.write(f.read())
 
         s.close()
-        self.status_bar.set_status(f"downloaded: {file_path}")
+        self.status_bar.set_status(f"downloaded: {file_path.replace(HOME_DIRECTORY, '~')}")
 
         return file_path
 
@@ -717,9 +812,13 @@ class Gopher:
         try:
             location = history.current_location
 
-            self.status_bar.set_status(f"loading: {location}")
+            if location.url != "LANDING":
+                self.status_bar.set_status(f"loading: {location}")
+                content = self.get_content(location)
 
-            content = self.get_content(location)
+            else:
+                content = LANDING_PAGE
+
             lines = [self._parse_line(line) for line in content]
 
             self.current_location_map = lines
