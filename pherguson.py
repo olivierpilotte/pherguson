@@ -6,7 +6,9 @@ import pathlib
 import platform
 import requests
 import shutil
+import signal
 import socket
+import subprocess
 import threading
 import time
 import ueberzug.lib.v0 as ueberzug
@@ -17,11 +19,15 @@ from urllib.parse import urlparse
 
 DEFAULT_ROW_HEIGHT = 15
 USE_BOLD_FONT = False
-STOP_THREAD = False
+STOP_IMAGE_PREVIEW_THREAD = False
 THUMBNAIL_SIZE = (384, 256)
 INLINE_IMAGES_ENABLED = platform.system() == "Linux"
 APPLICATION_HANDLER = "xdg-open" if platform.system() == "Linux" else "open"
 HOME_DIRECTORY = os.path.expanduser("~")
+
+SOUND_PREVIEW_THREAD = None
+
+SOUND_PREVIEW_STATE = "STOPPED"
 
 COLOR_MAP = [
     # gopher types
@@ -85,18 +91,22 @@ LANDING_PAGE = [
 ]
 
 
+def shorten(path):
+    return path.replace(HOME_DIRECTORY, "~")
+
+
 class Cache:
     cache_directory = f"{HOME_DIRECTORY}/.config/pherguson/cache"
 
     @classmethod
     def get_cache_directory(cls, host):
-        hash = hashlib.md5(host.encode()).hexdigest()
+        hash = hashlib.md5(host.encode()).hexdigest()[:8]
 
-        dir = f"{cls.cache_directory}/{hash}"
-        path = pathlib.Path(dir)
+        cache_directory = f"{cls.cache_directory}/{hash}"
+        path = pathlib.Path(cache_directory)
         path.mkdir(parents=True, exist_ok=True)
 
-        return dir
+        return cache_directory
 
     @classmethod
     def file_exists(cls, file_path):
@@ -326,7 +336,6 @@ class ContentWindow(urwid.ListBox):
             "center", 50, valign="middle", height=3), "exit_overlay")
 
         self.gopher.main_loop.widget = exit_overlay
-        return
 
     def refresh(self):
         self.gopher.crawl()
@@ -353,8 +362,8 @@ class ContentWindow(urwid.ListBox):
             os.system(f"{APPLICATION_HANDLER} {file_path}")
 
     def close_image_preview(self):
-        global STOP_THREAD
-        STOP_THREAD = True
+        global STOP_IMAGE_PREVIEW_THREAD
+        STOP_IMAGE_PREVIEW_THREAD = True
 
         highlighted_line = self.walker[self.current_highlight]
 
@@ -396,6 +405,9 @@ class ContentWindow(urwid.ListBox):
             elif line.type in ["img", "gif"]:
                 self.open_image_preview()
 
+            elif line.type in ["snd"]:
+                self.play_sound(line)
+
             else:
                 self.forward(line)
 
@@ -416,9 +428,6 @@ class ContentWindow(urwid.ListBox):
                 if line.type == "htm":
                     url = line.location.url.replace("URL:", "")
                     os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
-                    return
-
-            return
 
         elif key in ["l", "right", "enter"]:
             if not history.current_location.walkable:
@@ -433,13 +442,32 @@ class ContentWindow(urwid.ListBox):
             elif line.type in ["img", "gif"]:
                 self.open_image_preview()
 
+            elif line.type in ["snd"]:
+                self.play_sound(line)
+
             else:
                 self.forward(line)
 
-            return
-
         elif key in ["r"]:
             self.refresh()
+
+        elif key in ["s"]:
+            self.stop_sound()
+
+        elif key in ["p"]:
+            pause = "false"
+
+            global SOUND_PREVIEW_STATE
+            if SOUND_PREVIEW_STATE == "PLAYING":
+                SOUND_PREVIEW_STATE = "PAUSED"
+                pause = "true"
+
+            elif SOUND_PREVIEW_STATE == "PAUSED":
+                SOUND_PREVIEW_STATE = "PLAYING"
+                pause = "false"
+
+            command = f"echo '{{\"command\": [\"set_property\", \"pause\", {pause}]}}' | socat - /tmp/mpvsocket > /dev/null 2>&1"
+            os.system(command)
 
         elif key in ["i"]:
             with open("/tmp/pherguson.log", "a+") as f:
@@ -487,7 +515,6 @@ class ContentWindow(urwid.ListBox):
                     "center", 70, valign="middle", height=3), "download_overlay")
 
                 self.gopher.main_loop.widget = download_overlay
-                return
 
             elif key in ["o"]:
                 filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
@@ -501,6 +528,29 @@ class ContentWindow(urwid.ListBox):
 
                 self.gopher.status_bar.set_status(f"opening: {filename}")
                 os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
+
+    def play_sound(self, line):
+        global SOUND_PREVIEW_THREAD
+        if SOUND_PREVIEW_THREAD:
+            return
+
+        filename = self.gopher.download(line.location)
+        command = f"mpv --input-ipc-server=/tmp/mpvsocket {filename} > /dev/null 2>&1"
+
+        SOUND_PREVIEW_THREAD = subprocess.Popen(
+            command, stdout=subprocess.PIPE,
+            shell=True, preexec_fn=os.setsid)
+
+        global SOUND_PREVIEW_STATE
+        SOUND_PREVIEW_STATE = "PLAYING"
+
+        self.gopher.status_bar.set_status(f"playing: {shorten(filename)}")
+
+    def stop_sound(self):
+        global SOUND_PREVIEW_THREAD
+        if SOUND_PREVIEW_THREAD:
+            os.killpg(os.getpgid(SOUND_PREVIEW_THREAD.pid), signal.SIGTERM)
+            SOUND_PREVIEW_THREAD = None
 
     def display_image_inline(self, line):
         url = line.location.url.replace("URL:", "")
@@ -516,13 +566,11 @@ class ContentWindow(urwid.ListBox):
         highlighted_line.base_widget.set_text(f"- {highlighted_line.old_text[2:]}")
 
         img = Image.open(filename)
-
         img.thumbnail(THUMBNAIL_SIZE)
-        thumbnail_filename, thumbnail_extension = os.path.splitext(filename)
-        with open("/tmp/pherguson.log", "a+") as f:
-            f.write(f"{thumbnail_filename}-thumbnail{thumbnail_extension}")
 
+        thumbnail_filename, thumbnail_extension = os.path.splitext(filename)
         thumbnail_filename = f"{thumbnail_filename}-thumbnail{thumbnail_extension}"
+
         img.save(thumbnail_filename)
         img.close()
 
@@ -530,13 +578,13 @@ class ContentWindow(urwid.ListBox):
         thumbnail_width, thumbnail_height = thumbnail.size
         thumbnail.close()
 
-        self.image_preview = filename, thumbnail_filename
+        self.image_preview = (filename, thumbnail_filename)
         self.walker.insert(self.current_highlight + 1, Box(thumbnail_height))
         self.preview_image(thumbnail_filename, 0, self.current_highlight + 4)
 
     def preview_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
-            global STOP_THREAD
+            global STOP_IMAGE_PREVIEW_THREAD
             with ueberzug.Canvas() as canvas:
                 canvas.create_placement(
                     "image", x=x, y=y, width=50,
@@ -545,8 +593,8 @@ class ContentWindow(urwid.ListBox):
                     path=image_path)
 
                 while True:
-                    if STOP_THREAD:
-                        STOP_THREAD = False
+                    if STOP_IMAGE_PREVIEW_THREAD:
+                        STOP_IMAGE_PREVIEW_THREAD = False
                         break
 
                     time.sleep(0.01)
@@ -609,6 +657,7 @@ class ExitOverlay(urwid.Edit):
 
     def keypress(self, size, key):
         if key == "q":
+            self.gopher.content_window.stop_sound()
             raise urwid.ExitMainLoop()
 
         else:
@@ -769,7 +818,7 @@ class Gopher:
             with open(file_path, "wb") as f:
                 shutil.copyfileobj(response.raw, f)
 
-        self.status_bar.set_status(f"downloaded: {file_path}")
+        self.status_bar.set_status(f"downloaded: {file_path.replace(HOME_DIRECTORY, '~')}")
         return file_path
 
     def download(self, location, file_path=None):
@@ -837,8 +886,23 @@ class Gopher:
         screen.set_terminal_properties(256)
 
         self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP, screen=screen)
-        self.main_loop.run()
+
+        try:
+            self.main_loop.run()
+
+        except KeyboardInterrupt:
+            global STOP_IMAGE_PREVIEW_THREAD
+            STOP_IMAGE_PREVIEW_THREAD = True
+
+            global SOUND_PREVIEW_THREAD
+            if SOUND_PREVIEW_THREAD:
+                os.killpg(os.getpgid(SOUND_PREVIEW_THREAD.pid), signal.SIGTERM)
+                SOUND_PREVIEW_THREAD = None
+
+            exit(0)
 
 
 if __name__ == "__main__":
     Gopher().run()
+
+
