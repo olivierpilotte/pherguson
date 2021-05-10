@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import hashlib
+import ntpath
 import os
 import pathlib
 import platform
@@ -19,15 +20,18 @@ from urllib.parse import urlparse
 
 DEFAULT_ROW_HEIGHT = 15
 USE_BOLD_FONT = False
-STOP_IMAGE_PREVIEW_THREAD = False
 THUMBNAIL_SIZE = (384, 256)
 INLINE_IMAGES_ENABLED = platform.system() == "Linux"
 APPLICATION_HANDLER = "xdg-open" if platform.system() == "Linux" else "open"
 HOME_DIRECTORY = os.path.expanduser("~")
 
+STOP_IMAGE_PREVIEW_THREAD = False
 SOUND_PREVIEW_THREAD = None
-
 SOUND_PREVIEW_STATE = "STOPPED"
+SOUND_PREVIEW_FILENAME = None
+
+EXPERIMENTAL_MOUSE_NAVIGATION = False
+
 
 COLOR_MAP = [
     # gopher types
@@ -40,7 +44,7 @@ COLOR_MAP = [
     ("htm_img", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("ask", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("bin", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
-    ("snd", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("snd", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 
     # ui elements
     ("url_label", "light blue", urwid.DEFAULT),
@@ -83,11 +87,26 @@ SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask", "bin", "snd"]
 BINARIES = ["txt", "img", "gif", "bin"]
 
 LANDING_PAGE = [
-    ["i   P H E R G U S O N   "],
+    ["iPHERGUSON"],
     ["i"],
-    ["iPherguson is a gopher client"],
+    ["iPrototype gopher client with in-terminal image preview"],
+    ["hgithub", "URL:https://github.com/olivierpilotte/pherguson"],
     ["i"],
-    ["1Bookmarks"],
+    ["iKEYBINDINGS"],
+    ["i"],
+    ["iFocus URL bar: CTRL+l"],
+    ["i"],
+    ["iNAVIGATION"],
+    ["i"],
+    ["iUp: k, arrow-up"],
+    ["iDown: j, arrow-down"],
+    ["iPage Up: K, page-up"],
+    ["iPage Down: J, page-down"],
+    ["i"],
+    ["iForward: l, arrow-right, enter"],
+    ["iBack: h, arrow-left, backspace"],
+    ["i"],
+    ["iBookmarks"],
 ]
 
 
@@ -135,6 +154,10 @@ class Location:
     def __repr__(self):
         return f"gopher://{self.host}:{self.port}{self.url}"
 
+    def gopher(self):
+        url = "/" if self.url == "" else self.url
+        return f"1a_bookmark{url}\t{self.host}\t{self.port}"
+
 
 class Error(Exception):
     def __init__(self, message):
@@ -167,7 +190,7 @@ class History:
 
 
 history = History()
-history.forward("gopher.flatline.ltd", 70, "/")
+# history.forward("gopher.flatline.ltd", 70, "/")
 
 
 class Highlight(urwid.AttrMap):
@@ -270,6 +293,7 @@ class ContentWindow(urwid.ListBox):
 
             self.set_highlight(focus)
             self.set_focus(focus)
+            history.current_location.focus = focus
 
     def set_highlight(self, focus):
         if self.current_highlight is not None:
@@ -315,11 +339,11 @@ class ContentWindow(urwid.ListBox):
         except Exception as e:
             self.gopher.status_bar.set_status(f"{e}")
 
-    def forward_htm(self, line):
+    def forward_htm(self, line, offset=0):
         url = line.location.url.replace("URL:", "")
 
         if INLINE_IMAGES_ENABLED and is_image(url):
-            self.display_image_inline(line)
+            self.display_image_inline(line, offset)
 
         else:
             os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
@@ -351,11 +375,11 @@ class ContentWindow(urwid.ListBox):
         history.current_location.focus = self.current_highlight
         self.gopher.main_loop.widget = search_overlay
 
-    def open_image_preview(self):
+    def open_image_preview(self, offset=0):
         line = self.gopher.current_location_map[self.current_highlight]
 
         if INLINE_IMAGES_ENABLED:
-            self.display_image_inline(line)
+            self.display_image_inline(line, offset=offset)
 
         else:
             file_path = self.gopher.download(line.location)
@@ -374,7 +398,21 @@ class ContentWindow(urwid.ListBox):
 
         self.image_preview = None
 
+    def bookmark(self):
+        with open(f"{HOME_DIRECTORY}/.config/pherguson/bookmarks", "a") as file:
+            file.write(f"{history.current_location.gopher()}\n")
+
+    def _count_hidden_lines(self, size):
+        focus = self.get_focus()[1]
+        middle, top, bottom = self.calculate_visible(size, True)
+        items_on_top = len(top[1])
+
+        return focus - items_on_top
+
     def mouse_event(self, size, event, button, col, row, focus):
+        if not EXPERIMENTAL_MOUSE_NAVIGATION:
+            return
+
         if INLINE_IMAGES_ENABLED and not self.image_preview:
             if event == "mouse press":
                 if button == 4.0:
@@ -386,15 +424,23 @@ class ContentWindow(urwid.ListBox):
                 self.scroll()
 
         if event == "mouse release":
-            new_focus = self.get_focus()[1]
-            history.current_location.focus = new_focus
+            focus = self.get_focus()[1]
+            history.current_location.focus = focus
+            self.set_highlight(focus)
 
-            self.set_highlight(new_focus)
+        if event == "mouse press" and button == 1.0:  # left click
+            if INLINE_IMAGES_ENABLED and self.image_preview:
+                self.close_image_preview()
 
+            else:
+                self.back()
+
+        if event == "mouse press" and button == 3.0:  # right click
             line = self.gopher.current_location_map[self.current_highlight]
+            focus = self.get_focus()[1]
 
-            if self.walker[new_focus].base_widget.selectable():
-                self.set_highlight(new_focus)
+            if self.walker[focus].base_widget.selectable():
+                self.set_highlight(focus)
 
             elif INLINE_IMAGES_ENABLED and self.image_preview:
                 self.close_image_preview()
@@ -414,7 +460,8 @@ class ContentWindow(urwid.ListBox):
         super(ContentWindow, self).mouse_event(size, event, button, col, row, focus)
 
     def keypress(self, size, key):
-        line = self.gopher.current_location_map[self.current_highlight]
+        if history.current_location.walkable:
+            line = self.gopher.current_location_map[self.current_highlight]
 
         if INLINE_IMAGES_ENABLED and self.image_preview:
             if key in ["h", "left", "q", "esc"]:
@@ -437,16 +484,22 @@ class ContentWindow(urwid.ListBox):
                 self.ask(line)
 
             elif line.type == "htm":
-                self.forward_htm(line)
+                offset = self._count_hidden_lines(size)
+                self.forward_htm(line, offset)
 
             elif line.type in ["img", "gif"]:
-                self.open_image_preview()
+                offset = self._count_hidden_lines(size)
+
+                self.open_image_preview(offset)
 
             elif line.type in ["snd"]:
                 self.play_sound(line)
 
             else:
                 self.forward(line)
+
+        elif key in ["b"]:
+            self.bookmark()
 
         elif key in ["r"]:
             self.refresh()
@@ -530,13 +583,15 @@ class ContentWindow(urwid.ListBox):
                 os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
 
     def play_sound(self, line):
+        global SOUND_PREVIEW_FILENAME
         global SOUND_PREVIEW_THREAD
         if SOUND_PREVIEW_THREAD:
             return
 
         filename = self.gopher.download(line.location)
-        command = f"mpv --input-ipc-server=/tmp/mpvsocket {filename} > /dev/null 2>&1"
+        SOUND_PREVIEW_FILENAME = filename
 
+        command = f"mpv --input-ipc-server=/tmp/mpvsocket {filename} > /dev/null 2>&1"
         SOUND_PREVIEW_THREAD = subprocess.Popen(
             command, stdout=subprocess.PIPE,
             shell=True, preexec_fn=os.setsid)
@@ -552,7 +607,10 @@ class ContentWindow(urwid.ListBox):
             os.killpg(os.getpgid(SOUND_PREVIEW_THREAD.pid), signal.SIGTERM)
             SOUND_PREVIEW_THREAD = None
 
-    def display_image_inline(self, line):
+        global SOUND_PREVIEW_STATE
+        SOUND_PREVIEW_STATE = "STOPPED"
+
+    def display_image_inline(self, line, offset=0):
         url = line.location.url.replace("URL:", "")
 
         if url.startswith("http"):
@@ -580,7 +638,7 @@ class ContentWindow(urwid.ListBox):
 
         self.image_preview = (filename, thumbnail_filename)
         self.walker.insert(self.current_highlight + 1, Box(thumbnail_height))
-        self.preview_image(thumbnail_filename, 0, self.current_highlight + 4)
+        self.preview_image(thumbnail_filename, 0, self.current_highlight + 4 - offset)
 
     def preview_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
@@ -715,6 +773,9 @@ class StatusBar(urwid.WidgetWrap):
         super(StatusBar, self).__init__(self.attr)
 
     def set_status(self, message, level="ok"):
+        if SOUND_PREVIEW_STATE == "PLAYING":
+            message = f"[playing: {ntpath.basename(SOUND_PREVIEW_FILENAME)}] {message}"
+
         self.attr.base_widget.set_text(message)
         self.attr = urwid.AttrMap(urwid.Text(message, align="right"), level)
         super(StatusBar, self).__init__(self.attr)
@@ -867,6 +928,12 @@ class Gopher:
 
             else:
                 content = LANDING_PAGE
+                with open(f"{HOME_DIRECTORY}/.config/pherguson/bookmarks", "r") as file:
+                    for line in file.read().split("\n"):
+                        if line == "":
+                            break
+
+                        content.append(line.split("\t"))
 
             lines = [self._parse_line(line) for line in content]
 
