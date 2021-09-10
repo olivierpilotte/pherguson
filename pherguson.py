@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import datetime
 import hashlib
 import ntpath
 import os
@@ -53,6 +54,8 @@ COLOR_MAP = [
     ("divider", "light blue", urwid.DEFAULT),
     ("search_overlay", f"white{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
     ("download_overlay", f"white{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
+    ("bookmark_overlay", f"white{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
+    ("bookmark_entry", f"white{',bold' if USE_BOLD_FONT else ''}", "black"),
     ("exit_overlay", f"{',bold' if USE_BOLD_FONT else ''}", "dark red"),
     ("list", urwid.DEFAULT, urwid.DEFAULT),
 
@@ -143,20 +146,23 @@ class Line:
 
 
 class Location:
-    def __init__(self, host, port, url, focus=0, walkable=True):
+    def __init__(self, host, port, url, focus=0, walkable=True, bookmarks=False, history=False):
         self.host = host
-        self.port = port
+        self.port = int(port) if port else 70
         self.url = url
 
         self.focus = focus
         self.walkable = walkable
 
+        self.bookmarks = bookmarks
+        self.history = history
+
     def __repr__(self):
         return f"gopher://{self.host}:{self.port}{self.url}"
 
-    def gopher(self):
+    def get_link(self, name=None):
         url = "/" if self.url == "" else self.url
-        return f"1a_bookmark{url}\t{self.host}\t{self.port}"
+        return f"{'1' if self.walkable else '0'}{name if name else url}\t{url}\t{self.host}\t{self.port}"
 
 
 class Error(Exception):
@@ -170,16 +176,19 @@ class History:
 
     @property
     def current_location(self):
-        if len(self.history) == 0:
-            return Location(None, None, "LANDING")
-
         if len(self.history) == 1:
             return self.history[0]
 
         return self.history[-1]
 
-    def forward(self, host, port, url):
-        self.history.append(Location(host, port, url))
+    def forward(self, location):
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        link = location.get_link(name=f"{timestamp} {str(location)}")
+
+        with open(f"{HOME_DIRECTORY}/.config/pherguson/history", "a") as file:
+            file.write(f"{link}\n")
+
+        self.history.append(location)
 
     def set_focus(self, focus):
         history.current_location.focus = focus
@@ -188,9 +197,15 @@ class History:
         if len(self.history) > 1:
             self.history.pop()
 
+    def show_bookmarks(self):
+        self.history.append(Location("", 70, "", bookmarks=True))
+
+    def show_history(self):
+        self.history.append(Location("", 70, "", history=True))
+
 
 history = History()
-# history.forward("gopher.flatline.ltd", 70, "/")
+history.forward(Location("gopher.flatline.ltd", 70, "/"))
 
 
 class Highlight(urwid.AttrMap):
@@ -214,6 +229,9 @@ class Selectable(urwid.WidgetWrap):
 
     def selectable(self):
         return True
+
+    def keypress(self, size, key):
+        super(Selectable, self).keypress(size, key)
 
 
 class Unselectable(Selectable):
@@ -331,7 +349,8 @@ class ContentWindow(urwid.ListBox):
             walkable = line.type not in BINARIES
 
             history.current_location.focus = self.current_highlight
-            history.forward(line.location.host, line.location.port, line.location.url)
+            line.location.walkable = walkable
+            history.forward(line.location)
             history.current_location.walkable = walkable
 
             self.gopher.crawl()
@@ -398,9 +417,16 @@ class ContentWindow(urwid.ListBox):
 
         self.image_preview = None
 
-    def bookmark(self):
-        with open(f"{HOME_DIRECTORY}/.config/pherguson/bookmarks", "a") as file:
-            file.write(f"{history.current_location.gopher()}\n")
+    def add_bookmark(self):
+        widget = urwid.Filler(
+            urwid.AttrMap(BookmarkOverlay(self.gopher), "bookmark_overlay"))
+
+        bookmark_overlay = urwid.AttrMap(urwid.Overlay(
+            widget, self.gopher.main_loop.widget,
+            "center", 50, valign="middle", height=3), "bookmark_overlay")
+
+        # history.current_location.focus = self.current_highlight
+        self.gopher.main_loop.widget = bookmark_overlay
 
     def _count_hidden_lines(self, size):
         focus = self.get_focus()[1]
@@ -460,6 +486,19 @@ class ContentWindow(urwid.ListBox):
         super(ContentWindow, self).mouse_event(size, event, button, col, row, focus)
 
     def keypress(self, size, key):
+        def _open(location):
+            filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
+
+            if location.url.startswith("URL"):
+                url = location.url.replace("URL:", "")
+                self.gopher.download_http(url, filename)
+
+            else:
+                self.gopher.download(location, filename)
+
+            self.gopher.status_bar.set_status(f"opening: {filename}")
+            os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
+
         if history.current_location.walkable:
             line = self.gopher.current_location_map[self.current_highlight]
 
@@ -495,11 +534,16 @@ class ContentWindow(urwid.ListBox):
             elif line.type in ["snd"]:
                 self.play_sound(line)
 
+            elif line.type in ["bin"]:
+                line = self.gopher.current_location_map[self.current_highlight]
+                location = line.location
+                _open(line.location)
+
             else:
                 self.forward(line)
 
         elif key in ["b"]:
-            self.bookmark()
+            self.add_bookmark()
 
         elif key in ["r"]:
             self.refresh()
@@ -570,17 +614,46 @@ class ContentWindow(urwid.ListBox):
                 self.gopher.main_loop.widget = download_overlay
 
             elif key in ["o"]:
-                filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
+                location = line.location
+                _open(location)
 
-                if location.url.startswith("URL"):
-                    url = location.url.replace("URL:", "")
-                    self.gopher.download_http(url, filename)
+        elif key in ["B", "ctrl b"]:
+            content = [[""], ["i   B O O K M A R K S"], [""]]
+            with open(f"{HOME_DIRECTORY}/.config/pherguson/bookmarks") as file:
+                for line in file.read().split("\n"):
+                    if line == "":
+                        break
 
-                else:
-                    self.gopher.download(location, filename)
+                    content.append(line.split("\t"))
 
-                self.gopher.status_bar.set_status(f"opening: {filename}")
-                os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
+            history.show_bookmarks()
+
+            lines = [self.gopher._parse_line(line) for line in content]
+            self.gopher.current_location_map = lines
+
+            self.clear()
+            self.set_content(lines, focus=0)
+
+        elif key in ["H", "ctrl h"]:
+            content = []
+            with open(f"{HOME_DIRECTORY}/.config/pherguson/history") as file:
+                for line in file.read().split("\n"):
+                    if line == "":
+                        break
+
+                    content.append(line.split("\t"))
+
+            content.append(["i"])
+            content.append(["i   H I S T O R Y"])
+            content.append(["i"])
+
+            history.show_history()
+
+            lines = [self.gopher._parse_line(line) for line in content[::-1]]
+            self.gopher.current_location_map = lines
+
+            self.clear()
+            self.set_content(lines, focus=0)
 
     def play_sound(self, line):
         global SOUND_PREVIEW_FILENAME
@@ -668,9 +741,10 @@ class SearchOverlay(urwid.Edit):
 
     def keypress(self, size, key):
         if key in ["enter"]:
-            query = self.get_edit_text()
-            history.forward(self.line.location.host, self.line.location.port,
-                            f"{self.line.location.url}\t{query}")
+            query = self.get_edit_text().replace(" ", "_")
+
+            self.line.location.url = f"{self.line.location.url}\t{query}"
+            history.forward(self.line.location)
 
             self.gopher.main_loop.widget = self.gopher.window
             self.gopher.crawl()
@@ -679,6 +753,26 @@ class SearchOverlay(urwid.Edit):
             self.gopher.main_loop.widget = self.gopher.window
 
         super(SearchOverlay, self).keypress(size, key)
+
+
+class BookmarkOverlay(urwid.Edit):
+    def __init__(self, gopher):
+        self.gopher = gopher
+        super(BookmarkOverlay, self).__init__(caption=" Bookmark: ")
+
+    def keypress(self, size, key):
+        if key in ["enter"]:
+            bookmark_name = self.get_edit_text()
+
+            with open(f"{HOME_DIRECTORY}/.config/pherguson/bookmarks", "a") as file:
+                file.write(f"{history.current_location.get_link(bookmark_name)}\n")
+
+            self.gopher.main_loop.widget = self.gopher.window
+
+        if key in ["esc"]:
+            self.gopher.main_loop.widget = self.gopher.window
+
+        super(BookmarkOverlay, self).keypress(size, key)
 
 
 class DownloadOverlay(urwid.Edit):
@@ -757,7 +851,7 @@ class UrlBar(urwid.Columns):
             host, port = url.netloc.split(":") if ":" in url.netloc else (url.netloc, 70)
 
             history.current_location.focus = self.gopher.content_window.current_highlight
-            history.forward(host, port, url.path)
+            history.forward(Location(host, port, url.path))
             self.gopher.crawl()
 
             self.gopher.window.focus_position = "body"
@@ -822,17 +916,20 @@ class Gopher:
     def _get_socket(self, location):
         crlf = "\r\n"
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(5)
+        skt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        skt.settimeout(5)
 
         try:
-            s.connect((location.host, location.port))
-            s.send(str.encode(location.url) + str.encode(crlf))
-            s.shutdown(1)
+            with open("/tmp/pherguson.log", "w") as file:
+                file.write(f"{location.host} {location.port}\n")
 
-            return s
+            skt.connect((location.host, location.port))
+            skt.send(str.encode(location.url) + str.encode(crlf))
+            skt.shutdown(1)
 
-        except (ConnectionRefusedError, socket.gaierror):
+            return skt
+
+        except (ConnectionRefusedError, socket.gaierror, OSError):
             raise Error(f"error connecting to {location.host}:{location.port}")
 
     def get_content(self, location):
@@ -909,7 +1006,14 @@ class Gopher:
         text = line[0] if len(line) > 0 else ""
         url = line[1] if len(line) > 1 else ""
         host = line[2] if len(line) > 2 else ""
-        port = int(line[3]) if len(line) > 3 else 70
+        try:
+            port = int(line[3]) if len(line) > 3 else 70
+
+        except Exception:
+            port = 70
+
+        with open("/tmp/yeah", "w") as file:
+            file.write((str(history.current_location.url)))
 
         line_type = "inf"
         if history.current_location.walkable and len(text) > 0:
@@ -921,22 +1025,10 @@ class Gopher:
     def crawl(self):
         try:
             location = history.current_location
-
-            if location.url != "LANDING":
-                self.status_bar.set_status(f"loading: {location}")
-                content = self.get_content(location)
-
-            else:
-                content = LANDING_PAGE
-                with open(f"{HOME_DIRECTORY}/.config/pherguson/bookmarks", "r") as file:
-                    for line in file.read().split("\n"):
-                        if line == "":
-                            break
-
-                        content.append(line.split("\t"))
+            self.status_bar.set_status(f"loading: {location}")
+            content = self.get_content(location)
 
             lines = [self._parse_line(line) for line in content]
-
             self.current_location_map = lines
 
             self.content_window.clear()
@@ -971,5 +1063,3 @@ class Gopher:
 
 if __name__ == "__main__":
     Gopher().run()
-
-
