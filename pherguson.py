@@ -118,7 +118,7 @@ def shorten(path):
 
 
 class Cache:
-    cache_directory = f"{HOME_DIRECTORY}/.config/pherguson/cache"
+    cache_directory = f"{HOME_DIRECTORY}/.cache/pherguson"
 
     @classmethod
     def get_cache_directory(cls, host):
@@ -1012,7 +1012,7 @@ class Gopher:
         except Exception:
             port = 70
 
-        with open("/tmp/yeah", "w") as file:
+        with open("/tmp/pherguson.log", "w") as file:
             file.write((str(history.current_location.url)))
 
         line_type = "inf"
@@ -1040,6 +1040,11 @@ class Gopher:
             history.back()
             self.crawl()
 
+    def refresh_screen(self, main_loop):
+        while True:
+            time.sleep(1)
+            main_loop.draw_screen()
+
     def run(self):
         screen = urwid.raw_display.Screen()
         screen.set_terminal_properties(256)
@@ -1047,6 +1052,9 @@ class Gopher:
         self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP, screen=screen)
 
         try:
+            refresh_screen = threading.Thread(target=self.refresh_screen, args=(self.main_loop,))
+            refresh_screen.start()
+
             self.main_loop.run()
 
         except KeyboardInterrupt:
