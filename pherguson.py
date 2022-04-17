@@ -6,6 +6,7 @@ import ntpath
 import os
 import pathlib
 import platform
+import queue
 import requests
 import shutil
 import signal
@@ -486,6 +487,8 @@ class ContentWindow(urwid.ListBox):
         super(ContentWindow, self).mouse_event(size, event, button, col, row, focus)
 
     def keypress(self, size, key):
+        line = None
+
         def _open(location):
             filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
 
@@ -500,7 +503,11 @@ class ContentWindow(urwid.ListBox):
             os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
 
         if history.current_location.walkable:
-            line = self.gopher.current_location_map[self.current_highlight]
+            try:
+                line = self.gopher.current_location_map[self.current_highlight]
+
+            except IndexError as e:
+                pass
 
         if INLINE_IMAGES_ENABLED and self.image_preview:
             if key in ["h", "left", "q", "esc"]:
@@ -516,6 +523,9 @@ class ContentWindow(urwid.ListBox):
                     os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
 
         elif key in ["l", "right", "enter"]:
+            if not line:
+                return
+
             if not history.current_location.walkable:
                 return
 
@@ -1040,24 +1050,27 @@ class Gopher:
             history.back()
             self.crawl()
 
-    def refresh_screen(self, main_loop):
-        while True:
-            time.sleep(1)
+    def refresh_screen(self, main_loop, stop_event, message_queue):
+        while not stop_event.wait(timeout=1.0):
+            message_queue.put(time.strftime('time %X'))
             main_loop.draw_screen()
 
     def run(self):
         screen = urwid.raw_display.Screen()
         screen.set_terminal_properties(256)
 
+        stop_event = threading.Event()
+        message_queue = queue.Queue()
+
         self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP, screen=screen)
 
         try:
-            refresh_screen = threading.Thread(target=self.refresh_screen, args=(self.main_loop,))
-            refresh_screen.start()
+            self.refresh_screen = threading.Thread(target=self.refresh_screen, args=[self.main_loop, stop_event, message_queue])
+            self.refresh_screen.start()
 
             self.main_loop.run()
 
-        except KeyboardInterrupt:
+        except (urwid.ExitMainLoop, KeyboardInterrupt):
             global STOP_IMAGE_PREVIEW_THREAD
             STOP_IMAGE_PREVIEW_THREAD = True
 
@@ -1066,7 +1079,12 @@ class Gopher:
                 os.killpg(os.getpgid(SOUND_PREVIEW_THREAD.pid), signal.SIGTERM)
                 SOUND_PREVIEW_THREAD = None
 
-            exit(0)
+        stop_event.set()
+        for thread in threading.enumerate():
+            if thread != threading.current_thread():
+                thread.join()
+
+        exit(0)
 
 
 if __name__ == "__main__":
