@@ -118,6 +118,11 @@ def shorten(path):
     return path.replace(HOME_DIRECTORY, "~")
 
 
+def exec(command):
+    with open(os.devnull, 'wb') as devnull:
+        subprocess.check_call(command.split(" "), stdout=devnull, stderr=subprocess.STDOUT)
+
+
 class Cache:
     cache_directory = f"{HOME_DIRECTORY}/.cache/pherguson"
 
@@ -366,7 +371,7 @@ class ContentWindow(urwid.ListBox):
             self.display_image_inline(line, offset)
 
         else:
-            os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
+            exec(f"{APPLICATION_HANDLER} {url}")
 
     def back(self):
         history.back()
@@ -403,7 +408,7 @@ class ContentWindow(urwid.ListBox):
 
         else:
             file_path = self.gopher.download(line.location)
-            os.system(f"{APPLICATION_HANDLER} {file_path}")
+            exec(f"{APPLICATION_HANDLER} {file_path}")
 
     def close_image_preview(self):
         global STOP_IMAGE_PREVIEW_THREAD
@@ -500,7 +505,7 @@ class ContentWindow(urwid.ListBox):
                 self.gopher.download(location, filename)
 
             self.gopher.status_bar.set_status(f"opening: {filename}")
-            os.system(f"{APPLICATION_HANDLER} {filename} > /dev/null 2>&1")
+            exec(f"{APPLICATION_HANDLER} {filename}")
 
         if history.current_location.walkable:
             try:
@@ -516,11 +521,11 @@ class ContentWindow(urwid.ListBox):
             if key in ["l", "right", "enter"]:
                 if line.type in ["img", "gif"]:
                     self.gopher.status_bar.set_status(f"open: {self.image_preview[0]}")
-                    os.system(f"{APPLICATION_HANDLER} {self.image_preview[0]} > /dev/null 2>&1")
+                    exec(f"{APPLICATION_HANDLER} {self.image_preview[0]}")
 
                 if line.type == "htm":
                     url = line.location.url.replace("URL:", "")
-                    os.system(f"{APPLICATION_HANDLER} {url} > /dev/null 2>&1")
+                    exec(f"{APPLICATION_HANDLER} {url}")
 
         elif key in ["l", "right", "enter"]:
             if not line:
@@ -539,7 +544,11 @@ class ContentWindow(urwid.ListBox):
             elif line.type in ["img", "gif"]:
                 offset = self._count_hidden_lines(size)
 
-                self.open_image_preview(offset)
+                try:
+                    self.open_image_preview(offset)
+
+                except Exception:
+                    self.close_image_preview(offset)
 
             elif line.type in ["snd"]:
                 self.play_sound(line)
@@ -573,8 +582,8 @@ class ContentWindow(urwid.ListBox):
                 SOUND_PREVIEW_STATE = "PLAYING"
                 pause = "false"
 
-            command = f"echo '{{\"command\": [\"set_property\", \"pause\", {pause}]}}' | socat - /tmp/mpvsocket > /dev/null 2>&1"
-            os.system(command)
+            command = f"echo '{{\"command\": [\"set_property\", \"pause\", {pause}]}}' | socat - /tmp/mpvsocket"
+            exec(command)
 
         elif key in ["i"]:
             with open("/tmp/pherguson.log", "a+") as f:
@@ -674,7 +683,7 @@ class ContentWindow(urwid.ListBox):
         filename = self.gopher.download(line.location)
         SOUND_PREVIEW_FILENAME = filename
 
-        command = f"mpv --input-ipc-server=/tmp/mpvsocket {filename} > /dev/null 2>&1"
+        command = f"mpv --really-quiet --input-ipc-server=/tmp/mpvsocket {filename}"
         SOUND_PREVIEW_THREAD = subprocess.Popen(
             command, stdout=subprocess.PIPE,
             shell=True, preexec_fn=os.setsid)
@@ -950,12 +959,11 @@ class Gopher:
         while True:
             try:
                 line = file.readline()
-                if not line:
-                    break
-                if line == "":
+                if not line or line == "":
                     break
 
                 lines.append([part.strip("\n") for part in line.split("\t")])
+
             except Exception:
                 pass
 
