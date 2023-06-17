@@ -11,12 +11,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v3
+
+      - name: install dependencies
+        run:
+          apt update && apt install -y libxres-dev
 
       - name: setup python
         uses: actions/setup-python@v4
