@@ -11,6 +11,7 @@ import requests
 import shutil
 import signal
 import socket
+import sys
 import subprocess
 import threading
 import time
@@ -119,8 +120,12 @@ def shorten(path):
 
 
 def exec(command):
-    with open(os.devnull, 'wb') as devnull:
-        subprocess.check_call(command.split(" "), stdout=devnull, stderr=subprocess.STDOUT)
+    try:
+        with open(os.devnull, 'wb') as devnull:
+            subprocess.check_call(command.split(" "), stdout=devnull, stderr=devnull)
+
+    except Exception:
+        pass
 
 
 class Cache:
@@ -210,8 +215,24 @@ class History:
         self.history.append(Location("", 70, "", history=True))
 
 
-history = History()
-history.forward(Location("gopher.flatline.ltd", 70, "/"))
+try:
+    history = History()
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+
+        if not url.startswith("gopher://"):
+            url = f"gopher://{url}"
+
+        url = urlparse(url)
+        host, port = url.netloc.split(":") if ":" in url.netloc else (url.netloc, 70)
+        history.forward(Location(host, port, url.path))
+
+    else:
+        history.forward(Location("gopher.flatline.ltd", 70, "/"))
+
+except Exception as e:
+    print(e)
+    time.sleep(3)
 
 
 class Highlight(urwid.AttrMap):
@@ -408,7 +429,7 @@ class ContentWindow(urwid.ListBox):
 
         else:
             file_path = self.gopher.download(line.location)
-            exec(f"{APPLICATION_HANDLER} {file_path}")
+            exec(f"feh {file_path}")
 
     def close_image_preview(self):
         global STOP_IMAGE_PREVIEW_THREAD
@@ -511,7 +532,7 @@ class ContentWindow(urwid.ListBox):
             try:
                 line = self.gopher.current_location_map[self.current_highlight]
 
-            except IndexError as e:
+            except IndexError:
                 pass
 
         if INLINE_IMAGES_ENABLED and self.image_preview:
@@ -590,7 +611,7 @@ class ContentWindow(urwid.ListBox):
                 for line in self.gopher.current_location_map:
                     f.writelines(str(line))
 
-        elif key in ["tab", "ctrl l", ":"]:
+        elif key in ["tab", "ctrl l", "meta f", ":"]:
             self.gopher.window.focus_position = "header"
 
         elif key in ["j", "J", "up", "page up", "k", "K", "down", "page down"]:
@@ -858,7 +879,7 @@ class UrlBar(urwid.Columns):
         self.url_edit.base_widget.set_edit_pos(len(edit_text))
 
     def keypress(self, size, key):
-        if key in ["tab", "esc"]:
+        if key in ["tab", "esc", "ctrl l", "meta f"]:
             self.gopher.window.focus_position = "body"
 
         if key == "enter":
@@ -936,6 +957,7 @@ class Gopher:
         crlf = "\r\n"
 
         skt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        skt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         skt.settimeout(5)
 
         try:
@@ -1059,7 +1081,7 @@ class Gopher:
             self.crawl()
 
     def refresh_screen(self, main_loop, stop_event, message_queue):
-        while not stop_event.wait(timeout=1.0):
+        while not stop_event.wait(timeout=0.5):
             message_queue.put(time.strftime('time %X'))
             main_loop.draw_screen()
 
@@ -1073,8 +1095,8 @@ class Gopher:
         self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP, screen=screen)
 
         try:
-            self.refresh_screen = threading.Thread(target=self.refresh_screen, args=[self.main_loop, stop_event, message_queue])
-            self.refresh_screen.start()
+            self.refresh_screen_thread = threading.Thread(target=self.refresh_screen, args=[self.main_loop, stop_event, message_queue])
+            self.refresh_screen_thread.start()
 
             self.main_loop.run()
 
