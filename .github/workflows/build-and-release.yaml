@@ -61,17 +61,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@master
         with:
-          name: macOS_build
-          path: dist/
-
-      - uses: actions/download-artifact@master
-        with:
           name: Linux_build
-          path: dist/
-
-      - uses: actions/download-artifact@master
-        with:
-          name: Windows_build
           path: dist/
 
       - name: create release
