@@ -20,7 +20,8 @@ jobs:
 
       - name: install dependencies
         run:
-          sudo apt update && apt install -y libxres-dev
+          sudo apt update
+          sudo apt install -y libxres-dev
 
       - name: setup python
         uses: actions/setup-python@v4
