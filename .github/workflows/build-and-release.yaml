@@ -39,7 +39,7 @@ jobs:
 
       - name: build pherguson
         run: |
-          pyinstaller --onefile --name pherguson-${{ runner.os }}-${{ runner.arch }} shell.py
+          pyinstaller --onefile --name pherguson-${{ runner.os }}-${{ runner.arch }} pherguson.py
 
       - name: upload artifacts
         uses: actions/upload-artifact@v3
