@@ -55,7 +55,7 @@ jobs:
           path: |
             dist/
 
-  release:
+  release-linux:
     needs: [build]
 
     strategy:
@@ -69,6 +69,29 @@ jobs:
       - uses: actions/download-artifact@master
         with:
           name: Linux_build
+          path: dist/
+
+      - name: create release
+        uses: ncipollo/release-action@v1 # https://github.com/marketplace/actions/create-release
+        with:
+          token: ${{ secrets.TOKEN }}
+          generateReleaseNotes: true
+          artifacts: "dist/*"
+
+  release-windows:
+    needs: [build]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/download-artifact@master
+        with:
+          name: Windows_build
           path: dist/
 
       - name: create release
