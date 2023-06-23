@@ -24,6 +24,11 @@ jobs:
           sudo apt install -y libxres-dev
         if: matrix.os == 'ubuntu-latest'
 
+      - name: install dependencies
+        run: |
+          xcode-select --install
+        if: maxtrix.os == 'macos-latest'
+
       - name: setup python
         uses: actions/setup-python@v4
         with:
