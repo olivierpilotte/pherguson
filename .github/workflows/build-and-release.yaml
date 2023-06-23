@@ -26,7 +26,8 @@ jobs:
 
       - name: install dependencies
         run: |
-          xcode-select --install
+          brew update
+          brew install zlib
         if: matrix.os == 'macos-latest'
 
       - name: setup python
