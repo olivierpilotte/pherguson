@@ -46,7 +46,7 @@ jobs:
 
       - name: build pherguson
         run: |
-          pyinstaller --onefile --noconfirm --nowindow --name pherguson-${{ runner.os }}-${{ runner.arch }} pherguson.py
+          pyinstaller --onefile --noconfirm --nowindow --hidden-import requests --name pherguson-${{ runner.os }}-${{ runner.arch }} pherguson.py
 
       - name: upload artifacts
         uses: actions/upload-artifact@v3
@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
 
