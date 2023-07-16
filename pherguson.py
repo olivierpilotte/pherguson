@@ -15,30 +15,35 @@ import sys
 import subprocess
 import threading
 import time
-import ueberzug.lib.v0 as ueberzug
 import urwid
 
-from PIL import Image
 from urllib.parse import urlparse
 
-DEFAULT_ROW_HEIGHT = 15
-USE_BOLD_FONT = False
-THUMBNAIL_SIZE = (384, 256)
-INLINE_IMAGES_ENABLED = platform.system() == "Linux"
+
 APPLICATION_HANDLER = "xdg-open" if platform.system() == "Linux" else "open"
-HOME_DIRECTORY = os.path.expanduser("~")
-
-STOP_IMAGE_PREVIEW_THREAD = False
-SOUND_PREVIEW_THREAD = None
-SOUND_PREVIEW_STATE = "STOPPED"
-SOUND_PREVIEW_FILENAME = None
-
+DEFAULT_ROW_HEIGHT = 15
 EXPERIMENTAL_MOUSE_NAVIGATION = False
+HOME_DIRECTORY = os.path.expanduser("~")
+THUMBNAIL_SIZE = (384, 256)
+USE_BOLD_FONT = True
+
+SOUND_PREVIEW_ENABLED = True if shutil.which("mpv") else False
+sound_preview_thread = None
+sound_preview_state = "STOPPED"
+sound_preview_filename = None
+
+INLINE_IMAGES_ENABLED = True if shutil.which("ueberzug") else False
+stop_image_preview_thread = False
+
+if INLINE_IMAGES_ENABLED:
+    from PIL import Image
+    import ueberzug.lib.v0 as ueberzug
 
 
 COLOR_MAP = [
     # gopher types
     ("inf", f"{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("hex", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("gif", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("img", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("dir", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
@@ -48,6 +53,7 @@ COLOR_MAP = [
     ("ask", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("bin", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("snd", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("pdf", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 
     # ui elements
     ("url_label", "light blue", urwid.DEFAULT),
@@ -63,6 +69,7 @@ COLOR_MAP = [
 
     # status bar levels
     ("ok", f"dark green{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("loading", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("warning", f"brown{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("error", f"dark red{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 ]
@@ -71,8 +78,9 @@ TYPE_MAP = {
     # canonical types
     "0": "txt",  # text file
     "1": "dir",  # submenu
-    "3": "cns",  # CCSO Nameserver
-    "4": "err",  # Error
+    "2": "cns",  # CCSO Nameserver
+    "3": "err",  # Error
+    "4": "hex",  # Error
     "5": "dos",  # DOS file
     "6": "utf",  # uuencoded file
     "7": "ask",  # full text search
@@ -86,10 +94,15 @@ TYPE_MAP = {
     "d": "doc",  # pdf / .doc
     "h": "htm",  # html file / link
     "i": "inf",  # info message
+    "p": "png",  # image file
+    "r": "rtf",  # rft file
     "s": "snd",  # sound file
+    "P": "pdf",  # pdf file
+    "X": "xml",  # xml file
 }
-SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask", "bin", "snd"]
-BINARIES = ["txt", "img", "gif", "bin"]
+SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask",
+               "bin", "png", "rtf", "snd", "pdf", "xml", "hex"]
+BINARIES = ["txt", "hex", "img", "gif", "bin", "png", "rtf", "pdf", "xml"]
 
 LANDING_PAGE = [
     ["iPHERGUSON"],
@@ -119,9 +132,9 @@ def shorten(path):
     return path.replace(HOME_DIRECTORY, "~")
 
 
-def exec(command):
+def execute(command):
     try:
-        with open(os.devnull, 'wb') as devnull:
+        with open(os.devnull, "wb") as devnull:
             subprocess.check_call(command.split(" "), stdout=devnull, stderr=devnull)
 
     except Exception:
@@ -300,11 +313,7 @@ class ContentWindow(urwid.ListBox):
 
     def set_content(self, lines, focus):
         def _is_expandable(url):
-            url = url.lower()
-            if not INLINE_IMAGES_ENABLED:
-                return False
-
-            return is_image(url)
+            return INLINE_IMAGES_ENABLED and is_image(url.lower())
 
         for line in lines:
             selectable = line.type in SELECTABLES
@@ -383,7 +392,7 @@ class ContentWindow(urwid.ListBox):
             self.gopher.crawl()
 
         except Exception as e:
-            self.gopher.status_bar.set_status(f"{e}")
+            self.gopher.status_bar.set_status(f"error: {e}")
 
     def forward_htm(self, line, offset=0):
         url = line.location.url.replace("URL:", "")
@@ -392,7 +401,7 @@ class ContentWindow(urwid.ListBox):
             self.display_image_inline(line, offset)
 
         else:
-            exec(f"{APPLICATION_HANDLER} {url}")
+            execute(f"{APPLICATION_HANDLER} {url}")
 
     def back(self):
         history.back()
@@ -429,11 +438,11 @@ class ContentWindow(urwid.ListBox):
 
         else:
             file_path = self.gopher.download(line.location)
-            exec(f"feh {file_path}")
+            execute(f"{APPLICATION_HANDLER} {file_path}")
 
     def close_image_preview(self):
-        global STOP_IMAGE_PREVIEW_THREAD
-        STOP_IMAGE_PREVIEW_THREAD = True
+        global stop_image_preview_thread
+        stop_image_preview_thread = True
 
         highlighted_line = self.walker[self.current_highlight]
 
@@ -505,7 +514,12 @@ class ContentWindow(urwid.ListBox):
                 self.open_image_preview()
 
             elif line.type in ["snd"]:
-                self.play_sound(line)
+                if SOUND_PREVIEW_ENABLED:
+                    self.play_sound(line)
+
+                else:
+                    file_path = self.gopher.download(line.location)
+                    execute(f"{APPLICATION_HANDLER} {file_path}")
 
             else:
                 self.forward(line)
@@ -526,7 +540,7 @@ class ContentWindow(urwid.ListBox):
                 self.gopher.download(location, filename)
 
             self.gopher.status_bar.set_status(f"opening: {filename}")
-            exec(f"{APPLICATION_HANDLER} {filename}")
+            execute(f"{APPLICATION_HANDLER} {filename}")
 
         if history.current_location.walkable:
             try:
@@ -542,11 +556,11 @@ class ContentWindow(urwid.ListBox):
             if key in ["l", "right", "enter"]:
                 if line.type in ["img", "gif"]:
                     self.gopher.status_bar.set_status(f"open: {self.image_preview[0]}")
-                    exec(f"{APPLICATION_HANDLER} {self.image_preview[0]}")
+                    execute(f"{APPLICATION_HANDLER} {self.image_preview[0]}")
 
                 if line.type == "htm":
                     url = line.location.url.replace("URL:", "")
-                    exec(f"{APPLICATION_HANDLER} {url}")
+                    execute(f"{APPLICATION_HANDLER} {url}")
 
         elif key in ["l", "right", "enter"]:
             if not line:
@@ -572,9 +586,14 @@ class ContentWindow(urwid.ListBox):
                     self.close_image_preview(offset)
 
             elif line.type in ["snd"]:
-                self.play_sound(line)
+                if SOUND_PREVIEW_ENABLED:
+                    self.play_sound(line)
 
-            elif line.type in ["bin"]:
+                else:
+                    file_path = self.gopher.download(line.location)
+                    execute(f"mplayer {file_path}")
+
+            elif line.type in ["bin", "rtf", "pdf", "xml"]:
                 line = self.gopher.current_location_map[self.current_highlight]
                 location = line.location
                 _open(line.location)
@@ -590,21 +609,22 @@ class ContentWindow(urwid.ListBox):
 
         elif key in ["s"]:
             self.stop_sound()
+            self.refresh()
 
         elif key in ["p"]:
             pause = "false"
 
-            global SOUND_PREVIEW_STATE
-            if SOUND_PREVIEW_STATE == "PLAYING":
-                SOUND_PREVIEW_STATE = "PAUSED"
+            global sound_preview_state
+            if sound_preview_state == "PLAYING":
+                sound_preview_state = "PAUSED"
                 pause = "true"
 
-            elif SOUND_PREVIEW_STATE == "PAUSED":
-                SOUND_PREVIEW_STATE = "PLAYING"
+            elif sound_preview_state == "PAUSED":
+                sound_preview_state = "PLAYING"
                 pause = "false"
 
             command = f"echo '{{\"command\": [\"set_property\", \"pause\", {pause}]}}' | socat - /tmp/mpvsocket"
-            exec(command)
+            execute(command)
 
         elif key in ["i"]:
             with open("/tmp/pherguson.log", "a+") as f:
@@ -639,17 +659,23 @@ class ContentWindow(urwid.ListBox):
                 line = self.gopher.current_location_map[self.current_highlight]
                 location = line.location
 
-                if line.type not in BINARIES:
-                    return
-
             else:
                 location = history.current_location
 
             if key in ["d"]:
-                widget = urwid.Filler(urwid.AttrMap(DownloadOverlay(self.gopher, location), "download_overlay"))
-                download_overlay = urwid.AttrMap(urwid.Overlay(
-                    widget, self.gopher.main_loop.widget,
-                    "center", 70, valign="middle", height=3), "download_overlay")
+                widget = urwid.Filler(
+                    urwid.AttrMap(
+                        DownloadOverlay(self.gopher, location),
+                        "download_overlay"
+                    )
+                )
+                download_overlay = urwid.AttrMap(
+                    urwid.Overlay(
+                        widget, self.gopher.main_loop.widget,
+                        "center", 70, valign="middle", height=3
+                    ),
+                    "download_overlay"
+                )
 
                 self.gopher.main_loop.widget = download_overlay
 
@@ -696,32 +722,32 @@ class ContentWindow(urwid.ListBox):
             self.set_content(lines, focus=0)
 
     def play_sound(self, line):
-        global SOUND_PREVIEW_FILENAME
-        global SOUND_PREVIEW_THREAD
-        if SOUND_PREVIEW_THREAD:
+        global sound_preview_filename
+        global sound_preview_thread
+        if sound_preview_thread:
             return
 
         filename = self.gopher.download(line.location)
-        SOUND_PREVIEW_FILENAME = filename
+        sound_preview_filename = filename
 
         command = f"mpv --really-quiet --input-ipc-server=/tmp/mpvsocket {filename}"
-        SOUND_PREVIEW_THREAD = subprocess.Popen(
+        sound_preview_thread = subprocess.Popen(
             command, stdout=subprocess.PIPE,
             shell=True, preexec_fn=os.setsid)
 
-        global SOUND_PREVIEW_STATE
-        SOUND_PREVIEW_STATE = "PLAYING"
-
-        self.gopher.status_bar.set_status(f"playing: {shorten(filename)}")
+        global sound_preview_state
+        sound_preview_state = "PLAYING"
+        self.refresh()
+        # self.gopher.status_bar.set_status(f"playing: {shorten(filename)}")
 
     def stop_sound(self):
-        global SOUND_PREVIEW_THREAD
-        if SOUND_PREVIEW_THREAD:
-            os.killpg(os.getpgid(SOUND_PREVIEW_THREAD.pid), signal.SIGTERM)
-            SOUND_PREVIEW_THREAD = None
+        global sound_preview_thread
+        if sound_preview_thread:
+            os.killpg(os.getpgid(sound_preview_thread.pid), signal.SIGTERM)
+            sound_preview_thread = None
 
-        global SOUND_PREVIEW_STATE
-        SOUND_PREVIEW_STATE = "STOPPED"
+        global sound_preview_state
+        sound_preview_state = "STOPPED"
 
     def display_image_inline(self, line, offset=0):
         url = line.location.url.replace("URL:", "")
@@ -755,7 +781,7 @@ class ContentWindow(urwid.ListBox):
 
     def preview_image(self, image_path, x, y):
         def thread_function(image_path, x, y):
-            global STOP_IMAGE_PREVIEW_THREAD
+            global stop_image_preview_thread
             with ueberzug.Canvas() as canvas:
                 canvas.create_placement(
                     "image", x=x, y=y, width=50,
@@ -764,8 +790,8 @@ class ContentWindow(urwid.ListBox):
                     path=image_path)
 
                 while True:
-                    if STOP_IMAGE_PREVIEW_THREAD:
-                        STOP_IMAGE_PREVIEW_THREAD = False
+                    if stop_image_preview_thread:
+                        stop_image_preview_thread = False
                         break
 
                     time.sleep(0.01)
@@ -845,7 +871,7 @@ class ExitOverlay(urwid.Edit):
     def __init__(self, gopher):
         self.gopher = gopher
         super(ExitOverlay, self).__init__(
-            caption="really exit? (press 'q'): ", align="center")
+            caption="press 'q' again to exit", align="center")
 
     def keypress(self, size, key):
         if key == "q":
@@ -888,9 +914,12 @@ class UrlBar(urwid.Columns):
                 url = f"{self.scheme}{url}"
 
             url = urlparse(url)
-            host, port = url.netloc.split(":") if ":" in url.netloc else (url.netloc, 70)
+            host, port = \
+                url.netloc.split(":") if ":" in url.netloc else (url.netloc, 70)
 
-            history.current_location.focus = self.gopher.content_window.current_highlight
+            history.current_location.focus = \
+                self.gopher.content_window.current_highlight
+
             history.forward(Location(host, port, url.path))
             self.gopher.crawl()
 
@@ -906,12 +935,17 @@ class StatusBar(urwid.WidgetWrap):
         self.attr = urwid.AttrMap(urwid.Text("status", align="right"), "ok")
         super(StatusBar, self).__init__(self.attr)
 
-    def set_status(self, message, level="ok"):
-        if SOUND_PREVIEW_STATE == "PLAYING":
-            message = f"[playing: {ntpath.basename(SOUND_PREVIEW_FILENAME)}] {message}"
+    def set_status(self, message, level="ok", align="right"):
+        if sound_preview_state == "PLAYING":
+            width, _ = os.get_terminal_size()
+            sound_preview_message = (
+                f"[playing: {ntpath.basename(sound_preview_filename)}]")
+            spacing = width - len(message) - len(sound_preview_message) - 2
+
+            message = f"{sound_preview_message} {' ' * spacing} {message}"
 
         self.attr.base_widget.set_text(message)
-        self.attr = urwid.AttrMap(urwid.Text(message, align="right"), level)
+        self.attr = urwid.AttrMap(urwid.Text(message, align=align), level)
         super(StatusBar, self).__init__(self.attr)
 
 
@@ -958,7 +992,7 @@ class Gopher:
 
         skt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         skt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        skt.settimeout(5)
+        skt.settimeout(10)
 
         try:
             with open("/tmp/pherguson.log", "w") as file:
@@ -1004,10 +1038,12 @@ class Gopher:
             file_path = f"{download_directory}/{filename}"
 
             if Cache.file_exists(file_path):
-                self.status_bar.set_status(f"cached: {file_path.replace(HOME_DIRECTORY, '~')}")
+                self.status_bar.set_status(
+                    f"cached: {file_path.replace(HOME_DIRECTORY, '~')}")
                 return file_path
 
-        self.status_bar.set_status(f"downloading: {filename}")
+        self.status_bar.set_status(
+            f"downloading: {url}", level="loading")
         response = requests.get(url, stream=True)
 
         if response.status_code == 200:
@@ -1016,7 +1052,6 @@ class Gopher:
             with open(file_path, "wb") as f:
                 shutil.copyfileobj(response.raw, f)
 
-        self.status_bar.set_status(f"downloaded: {file_path.replace(HOME_DIRECTORY, '~')}")
         return file_path
 
     def download(self, location, file_path=None):
@@ -1026,10 +1061,13 @@ class Gopher:
 
             file_path = f"{download_directory}/{filename}"
             if Cache.file_exists(file_path):
-                self.status_bar.set_status(f"cached: {file_path.replace(HOME_DIRECTORY, '~')}")
+                self.status_bar.set_status(
+                    f"cached: {file_path.replace(HOME_DIRECTORY, '~')}")
                 return file_path
 
-        self.status_bar.set_status(f"downloading: {filename}")
+        self.status_bar.set_status(
+            f"downloading: gopher://{location.host}{location.url}",
+            level="loading")
 
         s = self._get_socket(location)
         f = s.makefile("rb")
@@ -1038,7 +1076,6 @@ class Gopher:
             file.write(f.read())
 
         s.close()
-        self.status_bar.set_status(f"downloaded: {file_path.replace(HOME_DIRECTORY, '~')}")
 
         return file_path
 
@@ -1065,13 +1102,14 @@ class Gopher:
     def crawl(self):
         try:
             location = history.current_location
-            self.status_bar.set_status(f"loading: {location}")
+            self.status_bar.set_status(f"{location}", level="loading")
             content = self.get_content(location)
 
             lines = [self._parse_line(line) for line in content]
             self.current_location_map = lines
 
             self.content_window.clear()
+            self.status_bar.set_status(f"{location}")
             self.content_window.set_content(lines, location.focus)
 
         except Error as e:
@@ -1092,22 +1130,25 @@ class Gopher:
         stop_event = threading.Event()
         message_queue = queue.Queue()
 
-        self.main_loop = urwid.MainLoop(self.window, palette=COLOR_MAP, screen=screen)
+        self.main_loop = urwid.MainLoop(
+            self.window, palette=COLOR_MAP, screen=screen)
 
         try:
-            self.refresh_screen_thread = threading.Thread(target=self.refresh_screen, args=[self.main_loop, stop_event, message_queue])
-            self.refresh_screen_thread.start()
+            self.refresh_screen_thread = threading.Thread(
+                target=self.refresh_screen,
+                args=[self.main_loop, stop_event, message_queue])
 
+            self.refresh_screen_thread.start()
             self.main_loop.run()
 
         except (urwid.ExitMainLoop, KeyboardInterrupt):
-            global STOP_IMAGE_PREVIEW_THREAD
-            STOP_IMAGE_PREVIEW_THREAD = True
+            global stop_image_preview_thread
+            stop_image_preview_thread = True
 
-            global SOUND_PREVIEW_THREAD
-            if SOUND_PREVIEW_THREAD:
-                os.killpg(os.getpgid(SOUND_PREVIEW_THREAD.pid), signal.SIGTERM)
-                SOUND_PREVIEW_THREAD = None
+            global sound_preview_thread
+            if sound_preview_thread:
+                os.killpg(os.getpgid(sound_preview_thread.pid), signal.SIGTERM)
+                sound_preview_thread = None
 
         stop_event.set()
         for thread in threading.enumerate():
