@@ -170,7 +170,9 @@ class Line:
 
 
 class Location:
-    def __init__(self, host, port, url, focus=0, walkable=True, bookmarks=False, history=False):
+    def __init__(self, host, port, url, focus=0, walkable=True,
+                 bookmarks=False, history=False):
+
         self.host = host
         self.port = int(port) if port else 70
         self.url = url
@@ -186,7 +188,10 @@ class Location:
 
     def get_link(self, name=None):
         url = "/" if self.url == "" else self.url
-        return f"{'1' if self.walkable else '0'}{name if name else url}\t{url}\t{self.host}\t{self.port}"
+        return (
+            f"{'1' if self.walkable else '0'}"
+            f"{name if name else url}\t{url}\t{self.host}\t{self.port}"
+        )
 
 
 class Error(Exception):
@@ -324,7 +329,10 @@ class ContentWindow(urwid.ListBox):
             if expandable and line.type == "htm":
                 type = "htm_img"
 
-            formatted_text = f"{line.type.upper() if selectable else ''}{' ' if selectable else ''}{line.text}"
+            formatted_text = (
+                f"{line.type.upper() if selectable else ''}"
+                f"{' ' if selectable else ''}{line.text}"
+            )
             self.walker.append(
                 Selectable(formatted_text, type, expandable=expandable)
                 if selectable else
@@ -342,8 +350,11 @@ class ContentWindow(urwid.ListBox):
                 return
 
             # find first selectable element
-            while not self.walker[focus].base_widget.selectable() and focus < len(self.walker) - 1:
+            while (not self.walker[focus].base_widget.selectable() and focus < len(self.walker) - 1):
                 focus += 1
+
+            if focus == len(self.walker) - 1:
+                return
 
             self.set_highlight(focus)
             self.set_focus(focus)
@@ -461,7 +472,6 @@ class ContentWindow(urwid.ListBox):
             widget, self.gopher.main_loop.widget,
             "center", 50, valign="middle", height=3), "bookmark_overlay")
 
-        # history.current_location.focus = self.current_highlight
         self.gopher.main_loop.widget = bookmark_overlay
 
     def _count_hidden_lines(self, size):
@@ -738,7 +748,6 @@ class ContentWindow(urwid.ListBox):
         global sound_preview_state
         sound_preview_state = "PLAYING"
         self.refresh()
-        # self.gopher.status_bar.set_status(f"playing: {shorten(filename)}")
 
     def stop_sound(self):
         global sound_preview_thread
@@ -1020,8 +1029,8 @@ class Gopher:
 
                 lines.append([part.strip("\n") for part in line.split("\t")])
 
-            except Exception:
-                pass
+            except Exception as e:
+                self.status_bar.set_status(str(e), level="warning")
 
         sock.close()
 
