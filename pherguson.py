@@ -53,6 +53,7 @@ COLOR_MAP = [
     ("ask", f"dark blue{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("bin", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("snd", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
+    ("vid", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
     ("pdf", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", urwid.DEFAULT),
 
     # ui elements
@@ -97,11 +98,12 @@ TYPE_MAP = {
     "p": "png",  # image file
     "r": "rtf",  # rft file
     "s": "snd",  # sound file
+    ";": "vid",  # video file
     "P": "pdf",  # pdf file
     "X": "xml",  # xml file
 }
 SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask",
-               "bin", "png", "rtf", "snd", "pdf", "xml", "hex"]
+               "bin", "png", "rtf", "snd", "vid", "pdf", "xml", "hex"]
 BINARIES = ["txt", "hex", "img", "gif", "bin", "png", "rtf", "pdf", "xml"]
 
 LANDING_PAGE = [
@@ -428,6 +430,10 @@ class ContentWindow(urwid.ListBox):
         self.gopher.main_loop.widget = exit_overlay
 
     def refresh(self):
+        global sound_preview_thread
+        if sound_preview_thread is None:
+            self.stop_sound()
+
         self.gopher.crawl()
 
     def ask(self, line):
@@ -523,7 +529,7 @@ class ContentWindow(urwid.ListBox):
             elif line.type in ["img", "gif"]:
                 self.open_image_preview()
 
-            elif line.type in ["snd"]:
+            elif line.type in ["snd", "vid"]:
                 if SOUND_PREVIEW_ENABLED:
                     self.play_sound(line)
 
@@ -595,7 +601,7 @@ class ContentWindow(urwid.ListBox):
                 except Exception:
                     self.close_image_preview(offset)
 
-            elif line.type in ["snd"]:
+            elif line.type in ["snd", "vid"]:
                 if SOUND_PREVIEW_ENABLED:
                     self.play_sound(line)
 
