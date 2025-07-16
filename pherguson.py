@@ -32,7 +32,7 @@ sound_preview_thread = None
 sound_preview_state = "STOPPED"
 sound_preview_filename = None
 
-INLINE_IMAGES_ENABLED = True if shutil.which("ueberzug") else False
+INLINE_IMAGES_ENABLED = False  # True if shutil.which("ueberzug") else False
 stop_image_preview_thread = False
 
 if INLINE_IMAGES_ENABLED:
@@ -603,7 +603,12 @@ class ContentWindow(urwid.ListBox):
 
             elif line.type in ["snd", "vid"]:
                 if SOUND_PREVIEW_ENABLED:
-                    self.play_sound(line)
+
+                    if line.type == "snd":
+                        self.play_sound(line)
+
+                    if line.type == "vid":
+                        self.play_video(line)
 
                 else:
                     file_path = self.gopher.download(line.location)
@@ -738,6 +743,12 @@ class ContentWindow(urwid.ListBox):
             self.set_content(lines, focus=0)
 
     def play_sound(self, line):
+        self.play_media(line)
+
+    def play_video(self, line):
+        self.play_media(line, video=True)
+
+    def play_media(self, line, video=False):
         global sound_preview_filename
         global sound_preview_thread
         if sound_preview_thread:
@@ -746,7 +757,7 @@ class ContentWindow(urwid.ListBox):
         filename = self.gopher.download(line.location)
         sound_preview_filename = filename
 
-        command = f"mpv --really-quiet --input-ipc-server=/tmp/mpvsocket {filename}"
+        command = f"mpv {'--no-video' if not video else ''} --really-quiet --input-ipc-server=/tmp/mpvsocket {filename}"
         sound_preview_thread = subprocess.Popen(
             command, stdout=subprocess.PIPE,
             shell=True, preexec_fn=os.setsid)
@@ -1007,7 +1018,7 @@ class Gopher:
 
         skt = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         skt.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        skt.settimeout(10)
+        skt.settimeout(2)
 
         try:
             with open("/tmp/pherguson.log", "w") as file:
