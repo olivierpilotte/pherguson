@@ -25,13 +25,20 @@ sudo pip3 install -r requirements.txt
 
 ## Run
 To run Pherguson:
+
+### Original Version
 ```bash
 python pherguson.py
 ```
 
+### Refactored Version (Recommended)
+```bash
+python pherguson_new.py
+```
+
 or using the virtual environment:
 ```bash
-.venv/bin/python pherguson.py
+.venv/bin/python pherguson_new.py
 ```
 
 ## User guide
@@ -60,8 +67,11 @@ To collapse the image, press any of the `Back` navigation keys or `Escape`.
 Download a file: `d`\
 Open a file in an external program: `o`
 
+## Documentation
+
+For detailed documentation about the refactored version, new features, and technical details, see the [docs/](docs/) directory.
+
 ## Todo:
-* refactor the code (it's a mess)
 * better handling of sockets
 * browser cache (specifically for images)
 * history overlay
