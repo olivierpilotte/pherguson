@@ -2,3 +2,4 @@ pherguson.egg-info/
 .code_examples
 .venv
 bin/
+__pycache__/
