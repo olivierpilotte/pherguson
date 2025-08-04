@@ -14,7 +14,7 @@ USE_BOLD_FONT = True
 
 # Feature flags
 SOUND_PREVIEW_ENABLED = True if shutil.which("mpv") else False
-INLINE_IMAGES_ENABLED = False  # True if shutil.which("ueberzug") else False
+INLINE_IMAGES_ENABLED = True if shutil.which("ueberzug") else False
 
 # Color scheme for urwid
 COLOR_MAP = [
