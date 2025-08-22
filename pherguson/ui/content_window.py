@@ -86,9 +86,22 @@ class ContentWindow(urwid.ListBox):
             if focus == len(self.walker) - 1:
                 return
 
-            self.set_highlight(focus)
+            # Set focus and highlight
             self.set_focus(focus)
             self.gopher.history.current_location.focus = focus
+            
+            # Set highlight with proper bounds checking
+            self._set_initial_highlight(focus)
+
+    def _set_initial_highlight(self, focus):
+        """Set initial highlight with proper bounds checking"""
+        try:
+            if (hasattr(self.gopher, 'client') and 
+                hasattr(self.gopher.client, 'current_location_map') and
+                len(self.gopher.client.current_location_map) > focus):
+                self.set_highlight(focus)
+        except Exception:
+            pass  # Ignore any errors during initial highlight
 
     def set_highlight(self, focus):
         """Set highlight on a specific item"""
@@ -102,16 +115,25 @@ class ContentWindow(urwid.ListBox):
         if focus is None:
             self.current_highlight = None
         else:
-            self.body[focus] = Highlight(self.body[focus])
-            self.current_highlight = focus
+            # Check if focus is within bounds
+            if (focus < len(self.body) and 
+                hasattr(self.gopher, 'client') and 
+                hasattr(self.gopher.client, 'current_location_map') and
+                focus < len(self.gopher.client.current_location_map)):
+                
+                self.body[focus] = Highlight(self.body[focus])
+                self.current_highlight = focus
 
-            line = self.gopher.client.current_location_map[focus]
-            if "URL" in line.location.url:
-                url = line.location.url.replace("URL:", "")
+                line = self.gopher.client.current_location_map[focus]
+                if "URL" in line.location.url:
+                    url = line.location.url.replace("URL:", "")
+                else:
+                    url = f"gopher://{line.location.host}{line.location.url}"
+
+                self.gopher.status_bar.set_status(url)
             else:
-                url = f"gopher://{line.location.host}{line.location.url}"
-
-            self.gopher.status_bar.set_status(url)
+                # Focus is out of bounds, don't set highlight
+                self.current_highlight = None
 
     def scroll(self):
         """Handle scrolling and update focus"""
@@ -153,24 +175,31 @@ class ContentWindow(urwid.ListBox):
                 self.gopher.navigate_back()
 
         if event == "mouse press" and button == 3.0:  # right click
-            line = self.gopher.client.current_location_map[self.current_highlight]
+            # Check if current_highlight is valid
+            if (self.current_highlight is not None and
+                hasattr(self.gopher, 'client') and
+                hasattr(self.gopher.client, 'current_location_map') and
+                self.current_highlight < len(self.gopher.client.current_location_map)):
+                line = self.gopher.client.current_location_map[self.current_highlight]
+            else:
+                line = None
             focus = self.get_focus()[1]
 
             if self.walker[focus].base_widget.selectable():
                 self.set_highlight(focus)
             elif INLINE_IMAGES_ENABLED and self.image_preview:
                 self.close_image_preview()
-            elif line.type == "htm":
+            elif line and line.type == "htm":
                 self.gopher.open_http_link(line)
-            elif line.type in ["img", "gif"]:
+            elif line and line.type in ["img", "gif"]:
                 self.open_image_preview()
-            elif line.type in ["snd", "vid"]:
+            elif line and line.type in ["snd", "vid"]:
                 if SOUND_PREVIEW_ENABLED:
                     self.play_sound(line)
                 else:
                     file_path = self.gopher.client.download(line.location)
                     execute(f"{APPLICATION_HANDLER} {file_path}")
-            else:
+            elif line:
                 self.gopher.navigate_forward(line)
 
         super(ContentWindow, self).mouse_event(size, event, button, col, row, focus)
@@ -189,10 +218,10 @@ class ContentWindow(urwid.ListBox):
             if key in ["h", "left", "q", "esc"]:
                 self.close_image_preview()
             if key in ["l", "right", "enter"]:
-                if line.type in ["img", "gif"]:
+                if line and line.type in ["img", "gif"]:
                     self.gopher.status_bar.set_status(f"open: {self.image_preview[0]}")
                     execute(f"{APPLICATION_HANDLER} {self.image_preview[0]}")
-                if line.type == "htm":
+                if line and line.type == "htm":
                     url = line.location.url.replace("URL:", "")
                     execute(f"{APPLICATION_HANDLER} {url}")
 
@@ -263,14 +292,19 @@ class ContentWindow(urwid.ListBox):
 
         elif key in ["d", "o"]:
             if self.gopher.history.current_location.walkable:
-                line = self.gopher.client.current_location_map[self.current_highlight]
-                location = line.location
+                try:
+                    line = self.gopher.client.current_location_map[self.current_highlight]
+                    location = line.location
+                except (IndexError, AttributeError):
+                    line = None
+                    location = self.gopher.history.current_location
             else:
+                line = None
                 location = self.gopher.history.current_location
 
             if key in ["d"]:
                 self.gopher.show_download_overlay(location)
-            elif key in ["o"]:
+            elif key in ["o"] and line:
                 self.gopher.open_file(line)
 
         elif key in ["B", "ctrl b"]:
@@ -395,7 +429,10 @@ class ContentWindow(urwid.ListBox):
 
     def open_image_preview(self, offset=0):
         """Open image preview"""
-        line = self.gopher.client.current_location_map[self.current_highlight]
+        try:
+            line = self.gopher.client.current_location_map[self.current_highlight]
+        except (IndexError, AttributeError):
+            return  # No valid line to preview
 
         if INLINE_IMAGES_ENABLED:
             self.display_image_inline(line, offset)

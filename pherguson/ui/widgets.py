@@ -145,10 +145,10 @@ class UrlBar(urwid.Columns):
         self.on_navigate = on_navigate
         self.on_focus_change = on_focus_change
         self.url_edit = urwid.AttrMap(urwid.Edit(caption=""), "url_bar")
-        self.scheme = "gopher://"
+        self.scheme = "gopher://"  # Default scheme
 
         content = [
-            ("pack", urwid.AttrMap(urwid.Text("// "), "url_label")),
+            ("pack", urwid.AttrMap(urwid.Text("> "), "url_label")),
             self.url_edit,
         ]
 
@@ -156,8 +156,12 @@ class UrlBar(urwid.Columns):
 
     def set_url(self, history_location):
         """Set the URL in the bar"""
-        port = f":{history_location.port}" if history_location.port != 70 else ""
-        edit_text = f"{history_location.host}{port}{history_location.url}"
+        if history_location.protocol == "gemini":
+            port = f":{history_location.port}" if history_location.port != 1965 else ""
+            edit_text = f"gemini://{history_location.host}{port}{history_location.url}"
+        else:
+            port = f":{history_location.port}" if history_location.port != 70 else ""
+            edit_text = f"gopher://{history_location.host}{port}{history_location.url}"
         self.url_edit.base_widget.set_edit_text(edit_text)
         self.url_edit.base_widget.set_edit_pos(len(edit_text))
 
@@ -168,7 +172,8 @@ class UrlBar(urwid.Columns):
 
         if key == "enter":
             url = self.url_edit.base_widget.get_edit_text()
-            if self.scheme not in url:
+            # Don't add scheme if URL already has one
+            if not (url.startswith("gopher://") or url.startswith("gemini://")):
                 url = f"{self.scheme}{url}"
 
             if self.on_navigate:

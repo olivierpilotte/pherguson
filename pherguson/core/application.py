@@ -11,7 +11,7 @@ import urwid
 from urllib.parse import urlparse
 
 from .models import History, Location
-from .gopher_client import GopherClient
+from .unified_client import UnifiedClient
 from ..config.settings import HOME_DIRECTORY, LANDING_PAGE, COLOR_MAP, APPLICATION_HANDLER, INLINE_IMAGES_ENABLED
 from ..ui.widgets import UrlBar, StatusBar, SearchOverlay, BookmarkOverlay, DownloadOverlay, ExitOverlay
 from ..ui.content_window import ContentWindow
@@ -24,7 +24,7 @@ class GopherApplication:
     def __init__(self):
         # Initialize history and client
         self.history = History()
-        self.client = GopherClient(status_callback=self._status_callback)
+        self.client = UnifiedClient(status_callback=self._status_callback)
         
         # Initialize UI components
         self._url_bar = urwid.AttrMap(UrlBar(self, on_navigate=self._handle_url_navigation, on_focus_change=self._handle_focus_change), "url")
@@ -54,16 +54,16 @@ class GopherApplication:
         self.crawl()
 
     def _initialize_default_location(self):
-        """Initialize with default location or command line argument"""
+        """Initialize with provided URL or default to gopher.flatline.ltd"""
         try:
+            # If a command line argument is provided, start with that URL
             if len(sys.argv) > 1:
                 url = sys.argv[1]
-                if not url.startswith("gopher://"):
-                    url = f"gopher://{url}"
-                url = urlparse(url)
-                host, port = url.netloc.split(":") if ":" in url.netloc else (url.netloc, 70)
-                self.history.forward(Location(host, port, url.path))
+                # Parse URL using unified client
+                location = self.client._parse_url(url)
+                self.history.forward(location)
             else:
+                # Otherwise start with the default landing page
                 self.history.forward(Location("gopher.flatline.ltd", 70, "/"))
         except Exception as e:
             print(e)
@@ -75,11 +75,11 @@ class GopherApplication:
 
     def _handle_url_navigation(self, url):
         """Handle URL navigation from URL bar"""
-        url = urlparse(url)
-        host, port = url.netloc.split(":") if ":" in url.netloc else (url.netloc, 70)
+        # Parse URL using unified client
+        location = self.client._parse_url(url)
         
         self.history.current_location.focus = self.content_window.current_highlight
-        self.history.forward(Location(host, port, url.path))
+        self.history.forward(location)
         self.crawl()
         self.window.focus_position = "body"
 

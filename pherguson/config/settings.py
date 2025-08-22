@@ -16,6 +16,10 @@ USE_BOLD_FONT = True
 SOUND_PREVIEW_ENABLED = True if shutil.which("mpv") else False
 INLINE_IMAGES_ENABLED = True if shutil.which("ueberzug") else False
 
+# Protocol support
+GEMINI_ENABLED = True
+GOPHER_ENABLED = True
+
 # Color scheme for urwid
 COLOR_MAP = [
     # gopher types

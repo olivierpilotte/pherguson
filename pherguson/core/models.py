@@ -19,27 +19,34 @@ class Line:
 
 
 class Location:
-    """Represents a gopher location (host, port, url)"""
+    """Represents a location (host, port, url) for both gopher and gemini protocols"""
     def __init__(self, host, port, url, focus=0, walkable=True,
-                 bookmarks=False, history=False):
+                 bookmarks=False, history=False, protocol="gopher"):
         self.host = host
-        self.port = int(port) if port else 70
+        self.port = int(port) if port else (1965 if protocol == "gemini" else 70)
         self.url = url
         self.focus = focus
         self.walkable = walkable
         self.bookmarks = bookmarks
         self.history = history
+        self.protocol = protocol
 
     def __repr__(self):
-        return f"gopher://{self.host}:{self.port}{self.url}"
+        if self.protocol == "gemini":
+            return f"gemini://{self.host}:{self.port}{self.url}"
+        else:
+            return f"gopher://{self.host}:{self.port}{self.url}"
 
     def get_link(self, name=None):
-        """Generate a gopher link string"""
+        """Generate a link string"""
         url = "/" if self.url == "" else self.url
-        return (
-            f"{'1' if self.walkable else '0'}"
-            f"{name if name else url}\t{url}\t{self.host}\t{self.port}"
-        )
+        if self.protocol == "gemini":
+            return f"gemini://{self.host}:{self.port}{url}"
+        else:
+            return (
+                f"{'1' if self.walkable else '0'}"
+                f"{name if name else url}\t{url}\t{self.host}\t{self.port}"
+            )
 
 
 class Error(Exception):
