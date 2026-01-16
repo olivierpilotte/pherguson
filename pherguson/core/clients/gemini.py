@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 
-from typing import List
-from urllib.parse import urlparse
 import re
-import Agunua
-from typing import Callable
+from typing import Callable, List
 
-from .models import Location, Line, Error
-from ..config.settings import TYPE_MAP
+import Agunua
+from urllib.parse import urlparse
+
+from pherguson.core.models import Location, Line, Error
+from pherguson.config.settings import TYPE_MAP
 
 
 class GeminiClient:

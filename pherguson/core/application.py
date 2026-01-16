@@ -11,7 +11,7 @@ import urwid
 from typing import List
 
 from .models import History, Location, Line
-from .unified_client import UnifiedClient
+from pherguson.core.clients import Client
 from ..config.settings import (
     HOME_DIRECTORY,
     COLOR_MAP,
@@ -36,7 +36,7 @@ class GopherApplication:
     def __init__(self) -> None:
         # Initialize history and client
         self.history = History()
-        self.client = UnifiedClient(status_callback=self._status_callback)
+        self.client = Client(status_callback=self._status_callback)
 
         # Initialize UI components
         self._url_bar = urwid.AttrMap(

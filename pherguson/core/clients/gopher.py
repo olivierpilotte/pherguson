@@ -6,9 +6,9 @@ import shutil
 import socket
 from urllib.parse import ParseResult, urlparse
 
-from .models import Location, Line, Error, Cache
-from ..config.settings import TYPE_MAP
-from ..utils.helpers import shorten
+from pherguson.core.models import Location, Line, Error, Cache
+from pherguson.config.settings import TYPE_MAP
+from pherguson.utils.helpers import shorten
 
 
 class GopherClient:

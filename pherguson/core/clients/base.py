@@ -2,12 +2,12 @@
 
 from typing import Callable, List
 
-from .gopher_client import GopherClient
-from .gemini_client import GeminiClient
-from .models import Line, Location
+from .gopher import GopherClient
+from .gemini import GeminiClient
+from ..models import Line, Location
 
 
-class UnifiedClient:
+class Client:
     """Unified client that handles both Gopher and Gemini protocols"""
 
     def __init__(self, status_callback: Callable[[str, str], None]):

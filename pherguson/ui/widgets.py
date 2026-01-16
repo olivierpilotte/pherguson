@@ -2,7 +2,7 @@
 
 import os
 import ntpath
-import urwid
+import urwid  # pyright: ignore[reportMissingTypeStubs]
 from ..config.settings import DEFAULT_ROW_HEIGHT
 
 
@@ -21,7 +21,7 @@ class Highlight(urwid.AttrMap):
 class Selectable(urwid.WidgetWrap):
     """A selectable text widget"""
 
-    def __init__(self, text, type, expandable=False, *args, **kwargs):
+    def __init__(self, text: str, type: str, expandable: bool = False, *args, **kwargs):
         self.text = text
         if expandable:
             self.text = f"+ {self.text}"
@@ -32,14 +32,14 @@ class Selectable(urwid.WidgetWrap):
     def selectable(self):
         return True
 
-    def keypress(self, size, key):
+    def keypress(self, size: tuple[int, int], key: str) -> None:
         super(Selectable, self).keypress(size, key)
 
 
 class Unselectable(Selectable):
     """A non-selectable text widget"""
 
-    def selectable(self):
+    def selectable(self) -> bool:
         return False
 
 

@@ -34,7 +34,7 @@ class ContentWindow(urwid.ListBox):
         super(ContentWindow, self).__init__(self.walker)
 
         self.image_preview = None
-        self.current_highlight = None
+        self.current_highlight: int | None = None
 
         # Sound preview state
         self.sound_preview_thread = None
