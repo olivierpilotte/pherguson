@@ -2,12 +2,12 @@
 
 import re
 from typing import Callable, List
-
-import Agunua
 from urllib.parse import urlparse
 
-from pherguson.core.models import Location, Line, Error
+import Agunua
+
 from pherguson.config.settings import TYPE_MAP
+from pherguson.core.models import Location, Line, Error
 
 
 class GeminiClient:

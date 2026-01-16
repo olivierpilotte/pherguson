@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 
-from typing import Callable, List
-import requests
 import shutil
 import socket
+from typing import Callable, List
 from urllib.parse import ParseResult, urlparse
 
-from pherguson.core.models import Location, Line, Error, Cache
+import requests
+
 from pherguson.config.settings import TYPE_MAP
+from pherguson.core.models import Location, Line, Error, Cache
 from pherguson.utils.helpers import shorten
 
 

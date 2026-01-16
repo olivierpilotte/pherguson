@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
-import os
 import ntpath
-import urwid  # pyright: ignore[reportMissingTypeStubs]
-from ..config.settings import DEFAULT_ROW_HEIGHT
+import os
+from typing import Callable
+
+import urwid
+
+from pherguson.config.settings import DEFAULT_ROW_HEIGHT
 
 
 class Highlight(urwid.AttrMap):
@@ -58,9 +61,8 @@ class Box(urwid.Pile):
 class SearchOverlay(urwid.Edit):
     """Search overlay widget"""
 
-    def __init__(self, gopher, line, on_search=None, on_cancel=None):
+    def __init__(self, line, on_search=None, on_cancel=None):
         self.line = line
-        self.gopher = gopher
         self.on_search = on_search
         self.on_cancel = on_cancel
         super(SearchOverlay, self).__init__(caption=" Search: ")
@@ -81,8 +83,7 @@ class SearchOverlay(urwid.Edit):
 class BookmarkOverlay(urwid.Edit):
     """Bookmark overlay widget"""
 
-    def __init__(self, gopher, on_save=None, on_cancel=None):
-        self.gopher = gopher
+    def __init__(self, on_save=None, on_cancel=None):
         self.on_save = on_save
         self.on_cancel = on_cancel
         super(BookmarkOverlay, self).__init__(caption=" Bookmark: ")
@@ -103,8 +104,7 @@ class BookmarkOverlay(urwid.Edit):
 class DownloadOverlay(urwid.Edit):
     """Download overlay widget"""
 
-    def __init__(self, gopher, location, on_download=None, on_cancel=None):
-        self.gopher = gopher
+    def __init__(self, location, on_download=None, on_cancel=None):
         self.location = location
         self.on_download = on_download
         self.on_cancel = on_cancel
@@ -130,8 +130,7 @@ class DownloadOverlay(urwid.Edit):
 class ExitOverlay(urwid.Edit):
     """Exit confirmation overlay widget"""
 
-    def __init__(self, gopher, on_exit=None, on_cancel=None):
-        self.gopher = gopher
+    def __init__(self, on_exit=None, on_cancel=None):
         self.on_exit = on_exit
         self.on_cancel = on_cancel
         super(ExitOverlay, self).__init__(
@@ -150,8 +149,7 @@ class ExitOverlay(urwid.Edit):
 class UrlBar(urwid.Columns):
     """URL bar widget"""
 
-    def __init__(self, gopher, on_navigate=None, on_focus_change=None):
-        self.gopher = gopher
+    def __init__(self, on_navigate=None, on_focus_change=None):
         self.on_navigate = on_navigate
         self.on_focus_change = on_focus_change
         self.url_edit = urwid.AttrMap(urwid.Edit(caption=""), "url_bar")
@@ -195,24 +193,26 @@ class UrlBar(urwid.Columns):
 class StatusBar(urwid.WidgetWrap):
     """Status bar widget"""
 
-    def __init__(self, gopher):
-        self.gopher = gopher
+    def __init__(self, on_get_content_window: Callable[[], urwid.AttrMap]):
+        self.on_get_content_window = on_get_content_window
         self.attr = urwid.AttrMap(urwid.Text("status", align="right"), "ok")
         super(StatusBar, self).__init__(self.attr)
 
     def set_status(self, message: str, level: str = "ok", align: str = "right"):
         """Set status message"""
         # Handle sound preview status if needed
-        content_window = self.gopher.content_window
+        content_window: urwid.AttrMap = self.on_get_content_window()
+
         if (
-            hasattr(content_window, "sound_preview_state")
+            content_window
+            and hasattr(content_window, "sound_preview_state")
             and content_window.sound_preview_state == "PLAYING"
             and hasattr(content_window, "sound_preview_filename")
             and content_window.sound_preview_filename
         ):
             width, _ = os.get_terminal_size()
             sound_preview_message = (
-                f"[playing: {ntpath.basename(content_window.sound_preview_filename)}]"
+                f" {ntpath.basename(content_window.sound_preview_filename)}"
             )
             spacing = width - len(message) - len(sound_preview_message) - 2
             message = f"{sound_preview_message} {' ' * spacing} {message}"

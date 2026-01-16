@@ -5,12 +5,10 @@ import hashlib
 import pathlib
 from typing import List
 
-from ..config.settings import HOME_DIRECTORY
+from pherguson.config.settings import HOME_DIRECTORY
 
 
 class Location:
-    """Represents a location (host, port, url) for both gopher and gemini protocols"""
-
     def __init__(
         self,
         host: str,
@@ -22,14 +20,16 @@ class Location:
         history: bool = False,
         protocol: str = "gopher",
     ):
-        self.host = host
-        self.port = int(port) if port > 0 else (1965 if protocol == "gemini" else 70)
-        self.url = url
-        self.focus = focus
-        self.walkable = walkable
-        self.bookmarks = bookmarks
-        self.history = history
-        self.protocol = protocol
+        self.host: str = host
+        self.port: int = (
+            int(port) if port > 0 else (1965 if protocol == "gemini" else 70)
+        )
+        self.url: str = url
+        self.focus: int = focus
+        self.walkable: bool = walkable
+        self.bookmarks: bool = bookmarks
+        self.history: bool = history
+        self.protocol: str = protocol
 
     def __repr__(self):
         if self.protocol == "gemini":
@@ -50,8 +50,6 @@ class Location:
 
 
 class Line:
-    """Represents a single line in a gopher menu"""
-
     def __init__(self, type: str, text: str, location: Location):
         self.type = type
         self.text = text
@@ -62,27 +60,21 @@ class Line:
 
 
 class Error(Exception):
-    """Custom exception for gopher protocol errors"""
-
     def __init__(self, message: str):
         self.message = message
 
 
 class History:
-    """Manages navigation history"""
-
     def __init__(self):
         self.history: List[Location] = []
 
     @property
     def current_location(self) -> Location:
-        """Get the current location from history"""
         if len(self.history) == 1:
             return self.history[0]
         return self.history[-1]
 
     def forward(self, location: Location):
-        """Add a new location to history"""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         link = location.get_link(name=f"{timestamp} {str(location)}")
 

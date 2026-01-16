@@ -7,18 +7,20 @@ import signal
 import sys
 import threading
 import time
-import urwid
 from typing import List
 
-from .models import History, Location, Line
-from pherguson.core.clients import Client
-from ..config.settings import (
+import urwid
+
+from pherguson.config.settings import (
     HOME_DIRECTORY,
     COLOR_MAP,
     APPLICATION_HANDLER,
     INLINE_IMAGES_ENABLED,
 )
-from ..ui.widgets import (
+from pherguson.core.clients import Client
+from pherguson.core.models import History, Location, Line
+from pherguson.ui.content_window import ContentWindow
+from pherguson.ui.widgets import (
     UrlBar,
     StatusBar,
     SearchOverlay,
@@ -26,8 +28,7 @@ from ..ui.widgets import (
     DownloadOverlay,
     ExitOverlay,
 )
-from ..ui.content_window import ContentWindow
-from ..utils.helpers import execute, is_image
+from pherguson.utils.helpers import execute, is_image
 
 
 class GopherApplication:
@@ -41,14 +42,15 @@ class GopherApplication:
         # Initialize UI components
         self._url_bar = urwid.AttrMap(
             UrlBar(
-                self,
                 on_navigate=self._handle_url_navigation,
                 on_focus_change=self._handle_focus_change,
             ),
             "url",
         )
         self._content_window = urwid.AttrMap(ContentWindow(self), "list")
-        self._status_bar = urwid.AttrMap(StatusBar(self), "status")
+        self._status_bar = urwid.AttrMap(
+            StatusBar(on_get_content_window=lambda: self.content_window), "status"
+        )
 
         # Create main window layout
         self.header_pile = urwid.Pile(
@@ -200,7 +202,6 @@ class GopherApplication:
         widget = urwid.Filler(
             urwid.AttrMap(
                 SearchOverlay(
-                    self,
                     line,
                     on_search=self._handle_search,
                     on_cancel=self._hide_overlay,
@@ -224,7 +225,6 @@ class GopherApplication:
         widget = urwid.Filler(
             urwid.AttrMap(
                 BookmarkOverlay(
-                    self,
                     on_save=self._handle_bookmark_save,
                     on_cancel=self._hide_overlay,
                 ),
@@ -246,7 +246,6 @@ class GopherApplication:
         widget = urwid.Filler(
             urwid.AttrMap(
                 DownloadOverlay(
-                    self,
                     location,
                     on_download=self._handle_download,
                     on_cancel=self._hide_overlay,
@@ -268,9 +267,7 @@ class GopherApplication:
         """Show exit confirmation overlay"""
         widget = urwid.Filler(
             urwid.AttrMap(
-                ExitOverlay(
-                    self, on_exit=self._handle_exit, on_cancel=self._hide_overlay
-                ),
+                ExitOverlay(on_exit=self._handle_exit, on_cancel=self._hide_overlay),
                 "exit_overlay",
             )
         )
@@ -355,27 +352,7 @@ class GopherApplication:
     def _handle_search(self, line: Line, query: str) -> None:
         """Handle search submission"""
         line.location.url = f"{line.location.url}\t{query}"
-        self.history.forward(line.location)
-        self.main_loop.widget = self.window
-        self.crawl()
-
-    def _handle_bookmark_save(self, bookmark_name: str) -> None:
-        """Handle bookmark save"""
-        config_dir = f"{HOME_DIRECTORY}/.config/pherguson"
-        pathlib.Path(config_dir).mkdir(parents=True, exist_ok=True)
-
-        with open(f"{config_dir}/bookmarks", "a") as file:
-            file.write(f"{self.history.current_location.get_link(bookmark_name)}\n")
-
-        self.main_loop.widget = self.window
-
-    def _handle_download(self, location: Location, file_path: str) -> None:
-        """Handle file download"""
-        if "URL" in location.url:
-            url = location.url.replace("URL:", "")
-            self.client.download_http(url, file_path)
-        else:
-            self.client.download(location, file_path)
+        self._content_window = urwid.AttrMap(ContentWindow(self), "list")
 
         self.main_loop.widget = self.window
 

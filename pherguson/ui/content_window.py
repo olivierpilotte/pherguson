@@ -5,11 +5,11 @@ import signal
 import subprocess
 import threading
 import time
-import urwid
 from typing import List
 
-from .widgets import Highlight, Selectable, Unselectable, Box
-from ..config.settings import (
+import urwid
+
+from pherguson.config.settings import (
     SELECTABLES,
     INLINE_IMAGES_ENABLED,
     SOUND_PREVIEW_ENABLED,
@@ -17,8 +17,9 @@ from ..config.settings import (
     THUMBNAIL_SIZE,
     EXPERIMENTAL_MOUSE_NAVIGATION,
 )
-from ..utils.helpers import is_image, execute
-from ..core.models import Line
+from pherguson.core.models import Line
+from pherguson.ui.widgets import Highlight, Selectable, Unselectable, Box
+from pherguson.utils.helpers import is_image, execute
 
 if INLINE_IMAGES_ENABLED:
     from PIL import Image

@@ -2,9 +2,9 @@
 
 from typing import Callable, List
 
-from .gopher import GopherClient
-from .gemini import GeminiClient
-from ..models import Line, Location
+from pherguson.core.clients.gemini import GeminiClient
+from pherguson.core.clients.gopher import GopherClient
+from pherguson.core.models import Line, Location
 
 
 class Client:

@@ -3,7 +3,6 @@
 import os
 import platform
 import shutil
-
 from typing import Dict, List, Tuple
 
 # Application settings

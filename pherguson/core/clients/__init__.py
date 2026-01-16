@@ -1,6 +1,6 @@
-from .base import Client
-from .gemini import GeminiClient
-from .gopher import GopherClient
+from pherguson.core.clients.base import Client
+from pherguson.core.clients.gemini import GeminiClient
+from pherguson.core.clients.gopher import GopherClient
 
 __all__ = [
     "Client",

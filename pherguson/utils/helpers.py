@@ -2,7 +2,8 @@
 
 import os
 import subprocess
-from ..config.settings import HOME_DIRECTORY
+
+from pherguson.config.settings import HOME_DIRECTORY
 
 
 def shorten(path: str) -> str:
