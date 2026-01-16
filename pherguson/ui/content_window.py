@@ -1,21 +1,24 @@
 #!/usr/bin/env python
 
-import json
 import os
 import signal
 import subprocess
 import threading
 import time
 import urwid
-from urllib.parse import urlparse
+from typing import List
 
 from .widgets import Highlight, Selectable, Unselectable, Box
 from ..config.settings import (
-    SELECTABLES, BINARIES, INLINE_IMAGES_ENABLED, 
-    SOUND_PREVIEW_ENABLED, APPLICATION_HANDLER, THUMBNAIL_SIZE,
-    EXPERIMENTAL_MOUSE_NAVIGATION
+    SELECTABLES,
+    INLINE_IMAGES_ENABLED,
+    SOUND_PREVIEW_ENABLED,
+    APPLICATION_HANDLER,
+    THUMBNAIL_SIZE,
+    EXPERIMENTAL_MOUSE_NAVIGATION,
 )
 from ..utils.helpers import is_image, execute
+from ..core.models import Line
 
 if INLINE_IMAGES_ENABLED:
     from PIL import Image
@@ -24,7 +27,7 @@ if INLINE_IMAGES_ENABLED:
 
 class ContentWindow(urwid.ListBox):
     """Main content display window"""
-    
+
     def __init__(self, gopher):
         self.gopher = gopher
         self.walker = urwid.SimpleFocusListWalker([])
@@ -32,23 +35,24 @@ class ContentWindow(urwid.ListBox):
 
         self.image_preview = None
         self.current_highlight = None
-        
+
         # Sound preview state
         self.sound_preview_thread = None
         self.sound_preview_state = "STOPPED"
         self.sound_preview_filename = None
-        
+
         # Image preview state
         self.stop_image_preview_thread = False
 
     def clear(self):
         """Clear all content from the window"""
-        for i in range(len(self.walker)):
+        for _ in range(len(self.walker)):
             self.walker.pop()
 
-    def set_content(self, lines, focus):
+    def set_content(self, lines: List[Line], focus: int = 0):
         """Set content in the window"""
-        def _is_expandable(url):
+
+        def _is_expandable(url: str) -> bool:
             return INLINE_IMAGES_ENABLED and is_image(url.lower())
 
         for line in lines:
@@ -63,11 +67,11 @@ class ContentWindow(urwid.ListBox):
                 f"{line.type.upper() if selectable else ''}"
                 f"{' ' if selectable else ''}{line.text}"
             )
-            
+
             self.walker.append(
                 Selectable(formatted_text, type, expandable=expandable)
-                if selectable else
-                Unselectable(formatted_text, type)
+                if selectable
+                else Unselectable(formatted_text, type)
             )
 
         if focus > len(self.walker):
@@ -80,7 +84,10 @@ class ContentWindow(urwid.ListBox):
                 return
 
             # find first selectable element
-            while (not self.walker[focus].base_widget.selectable() and focus < len(self.walker) - 1):
+            while (
+                not self.walker[focus].base_widget.selectable()
+                and focus < len(self.walker) - 1
+            ):
                 focus += 1
 
             if focus == len(self.walker) - 1:
@@ -89,16 +96,18 @@ class ContentWindow(urwid.ListBox):
             # Set focus and highlight
             self.set_focus(focus)
             self.gopher.history.current_location.focus = focus
-            
+
             # Set highlight with proper bounds checking
             self._set_initial_highlight(focus)
 
     def _set_initial_highlight(self, focus):
         """Set initial highlight with proper bounds checking"""
         try:
-            if (hasattr(self.gopher, 'client') and 
-                hasattr(self.gopher.client, 'current_location_map') and
-                len(self.gopher.client.current_location_map) > focus):
+            if (
+                hasattr(self.gopher, "client")
+                and hasattr(self.gopher.client, "current_location_map")
+                and len(self.gopher.client.current_location_map) > focus
+            ):
                 self.set_highlight(focus)
         except Exception:
             pass  # Ignore any errors during initial highlight
@@ -116,11 +125,12 @@ class ContentWindow(urwid.ListBox):
             self.current_highlight = None
         else:
             # Check if focus is within bounds
-            if (focus < len(self.body) and 
-                hasattr(self.gopher, 'client') and 
-                hasattr(self.gopher.client, 'current_location_map') and
-                focus < len(self.gopher.client.current_location_map)):
-                
+            if (
+                focus < len(self.body)
+                and hasattr(self.gopher, "client")
+                and hasattr(self.gopher.client, "current_location_map")
+                and focus < len(self.gopher.client.current_location_map)
+            ):
                 self.body[focus] = Highlight(self.body[focus])
                 self.current_highlight = focus
 
@@ -137,11 +147,11 @@ class ContentWindow(urwid.ListBox):
 
     def scroll(self):
         """Handle scrolling and update focus"""
-        new_focus = self.get_focus()[1]
-        self.gopher.history.current_location.focus = new_focus
+        focus = self.get_focus()[1]
+        self.gopher.history.current_location.focus = focus
 
-        if self.walker[new_focus].base_widget.selectable():
-            self.set_highlight(new_focus)
+        if self.walker[focus].base_widget.selectable():
+            self.set_highlight(focus)
 
     def _count_hidden_lines(self, size):
         """Count lines hidden above the current view"""
@@ -176,13 +186,17 @@ class ContentWindow(urwid.ListBox):
 
         if event == "mouse press" and button == 3.0:  # right click
             # Check if current_highlight is valid
-            if (self.current_highlight is not None and
-                hasattr(self.gopher, 'client') and
-                hasattr(self.gopher.client, 'current_location_map') and
-                self.current_highlight < len(self.gopher.client.current_location_map)):
+            if (
+                self.current_highlight is not None
+                and hasattr(self.gopher, "client")
+                and hasattr(self.gopher.client, "current_location_map")
+                and self.current_highlight
+                < len(self.gopher.client.current_location_map)
+            ):
                 line = self.gopher.client.current_location_map[self.current_highlight]
             else:
                 line = None
+
             focus = self.get_focus()[1]
 
             if self.walker[focus].base_widget.selectable():
@@ -218,41 +232,46 @@ class ContentWindow(urwid.ListBox):
             if key in ["h", "left", "q", "esc"]:
                 self.close_image_preview()
             if key in ["l", "right", "enter"]:
-                if line and line.type in ["img", "gif"]:
-                    self.gopher.status_bar.set_status(f"open: {self.image_preview[0]}")
-                    execute(f"{APPLICATION_HANDLER} {self.image_preview[0]}")
-                if line and line.type == "htm":
-                    url = line.location.url.replace("URL:", "")
-                    execute(f"{APPLICATION_HANDLER} {url}")
+                if line:
+                    match line.type:
+                        case "img" | "gif":
+                            self.gopher.status_bar.set_status(
+                                f"open: {self.image_preview[0]}"
+                            )
+                            execute(f"{APPLICATION_HANDLER} {self.image_preview[0]}")
+                        case "htm":
+                            url = line.location.url.replace("URL:", "")
+                            execute(f"{APPLICATION_HANDLER} {url}")
 
         elif key in ["l", "right", "enter"]:
             if not line or not self.gopher.history.current_location.walkable:
                 return
 
-            if line.type == "ask":
-                self.gopher.show_search_overlay(line)
-            elif line.type == "htm":
-                offset = self._count_hidden_lines(size)
-                self.gopher.open_http_link(line, offset)
-            elif line.type in ["img", "gif"]:
-                offset = self._count_hidden_lines(size)
-                try:
-                    self.open_image_preview(offset)
-                except Exception:
-                    self.close_image_preview(offset)
-            elif line.type in ["snd", "vid"]:
-                if SOUND_PREVIEW_ENABLED:
-                    if line.type == "snd":
-                        self.play_sound(line)
-                    if line.type == "vid":
-                        self.play_video(line)
-                else:
-                    file_path = self.gopher.client.download(line.location)
-                    execute(f"mplayer {file_path}")
-            elif line.type in ["bin", "rtf", "pdf", "xml"]:
-                self.gopher.open_file(line)
-            else:
-                self.gopher.navigate_forward(line)
+            match line.type:
+                case "ask":
+                    self.gopher.show_search_overlay(line)
+                case "htm":
+                    offset = self._count_hidden_lines(size)
+                    self.gopher.open_http_link(line, offset)
+                case "img" | "gif":
+                    offset = self._count_hidden_lines(size)
+                    try:
+                        self.open_image_preview(offset)
+                    except Exception:
+                        self.close_image_preview(offset)
+                case "snd" | "vid":
+                    if SOUND_PREVIEW_ENABLED:
+                        if line.type == "snd":
+                            self.play_sound(line)
+                        if line.type == "vid":
+                            self.play_video(line)
+                    else:
+                        file_path = self.gopher.client.download(line.location)
+                        execute(f"mplayer {file_path}")
+                case "bin" | "rtf" | "pdf" | "xml":
+                    self.gopher.open_file(line)
+                case _:
+                    self.gopher.navigate_forward(line)
 
         elif key in ["b"]:
             self.gopher.show_bookmark_overlay()
@@ -293,7 +312,9 @@ class ContentWindow(urwid.ListBox):
         elif key in ["d", "o"]:
             if self.gopher.history.current_location.walkable:
                 try:
-                    line = self.gopher.client.current_location_map[self.current_highlight]
+                    line = self.gopher.client.current_location_map[
+                        self.current_highlight
+                    ]
                     location = line.location
                 except (IndexError, AttributeError):
                     line = None
@@ -329,19 +350,20 @@ class ContentWindow(urwid.ListBox):
         filename = self.gopher.client.download(line.location)
         self.sound_preview_filename = filename
 
-        command = f"mpv {'--no-video' if not video else ''} --really-quiet --input-ipc-server=/tmp/mpvsocket {filename}"
+        command = f"mpv {'--no-video' if not video else ''} --really-quiet --input-ipc-server=/tmp/mpvsocket {filename} 2>&1 >/dev/null"
         self.sound_preview_thread = subprocess.Popen(
-            command, stdout=subprocess.PIPE,
-            shell=True, preexec_fn=os.setsid)
+            command, stdout=subprocess.PIPE, shell=True, preexec_fn=os.setsid
+        )
 
         self.sound_preview_state = "PLAYING"
         self.gopher.refresh()
-        
+
         # Start monitoring thread to detect when playback ends
         self._start_sound_monitoring()
 
     def _start_sound_monitoring(self):
         """Start a background thread to monitor sound playback status"""
+
         def monitor_sound():
             while self.sound_preview_thread and self.sound_preview_state == "PLAYING":
                 try:
@@ -354,28 +376,32 @@ class ContentWindow(urwid.ListBox):
                         # Trigger a refresh to update the status bar
                         self.gopher.refresh()
                         break
-                    
+
                     # Check if playback has ended using mpv socket
                     try:
                         import json
                         import socket as socket_lib
-                        
+
                         # Try to connect to mpv socket to check playback status
-                        sock = socket_lib.socket(socket_lib.AF_UNIX, socket_lib.SOCK_STREAM)
+                        sock = socket_lib.socket(
+                            socket_lib.AF_UNIX, socket_lib.SOCK_STREAM
+                        )
                         sock.settimeout(0.1)
-                        sock.connect('/tmp/mpvsocket')
-                        
+                        sock.connect("/tmp/mpvsocket")
+
                         # Send a command to check if mpv is still playing
                         command = '{"command": ["get_property", "idle-active"]}\n'
                         sock.send(command.encode())
-                        
+
                         response = sock.recv(1024).decode()
                         sock.close()
-                        
+
                         # Parse response
                         try:
                             data = json.loads(response)
-                            if data.get('data', False):  # idle-active is True when playback has ended
+                            if data.get(
+                                "data", False
+                            ):  # idle-active is True when playback has ended
                                 # Playback has ended, reset state
                                 self.sound_preview_thread = None
                                 self.sound_preview_state = "STOPPED"
@@ -384,11 +410,11 @@ class ContentWindow(urwid.ListBox):
                                 break
                         except (json.JSONDecodeError, KeyError):
                             pass
-                            
+
                     except (socket_lib.error, FileNotFoundError):
                         # Socket not available, fall back to process monitoring
                         pass
-                        
+
                 except Exception:
                     # If any error occurs, reset state
                     self.sound_preview_thread = None
@@ -396,9 +422,9 @@ class ContentWindow(urwid.ListBox):
                     self.sound_preview_filename = None
                     self.gopher.refresh()
                     break
-                
+
                 time.sleep(0.5)  # Check every 500ms
-        
+
         # Start monitoring in background thread
         monitoring_thread = threading.Thread(target=monitor_sound, daemon=True)
         monitoring_thread.start()
@@ -424,7 +450,7 @@ class ContentWindow(urwid.ListBox):
             self.sound_preview_state = "PLAYING"
             pause = "false"
 
-        command = f"echo '{{\"command\": [\"set_property\", \"pause\", {pause}]}}' | socat - /tmp/mpvsocket"
+        command = f'echo \'{{"command": ["set_property", "pause", {pause}]}}\' | socat - /tmp/mpvsocket'
         execute(command)
 
     def open_image_preview(self, offset=0):
@@ -451,7 +477,7 @@ class ContentWindow(urwid.ListBox):
         self.walker.pop(self.current_highlight + 1)
         self.image_preview = None
 
-    def display_image_inline(self, line, offset=0):
+    def display_image_inline(self, line: Line, offset=0):
         """Display image inline in terminal"""
         if not INLINE_IMAGES_ENABLED:
             return
@@ -492,10 +518,14 @@ class ContentWindow(urwid.ListBox):
         def thread_function(image_path, x, y):
             with ueberzug.Canvas() as canvas:
                 canvas.create_placement(
-                    "image", x=x, y=y, width=50,
+                    "image",
+                    x=x,
+                    y=y,
+                    width=50,
                     scaler=ueberzug.ScalerOption.FIT_CONTAIN.value,
                     visibility=ueberzug.Visibility.VISIBLE,
-                    path=image_path)
+                    path=image_path,
+                )
 
                 while True:
                     if self.stop_image_preview_thread:
@@ -503,4 +533,4 @@ class ContentWindow(urwid.ListBox):
                         break
                     time.sleep(0.01)
 
-        threading.Thread(target=thread_function, args=(image_path, x, y)).start() 
+        threading.Thread(target=thread_function, args=(image_path, x, y)).start()

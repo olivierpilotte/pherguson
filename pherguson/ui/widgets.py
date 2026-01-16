@@ -3,12 +3,12 @@
 import os
 import ntpath
 import urwid
-from ..config.settings import DEFAULT_ROW_HEIGHT, SELECTABLES, INLINE_IMAGES_ENABLED
-from ..utils.helpers import is_image
+from ..config.settings import DEFAULT_ROW_HEIGHT
 
 
 class Highlight(urwid.AttrMap):
     """Widget for highlighting selected items"""
+
     def __init__(self, attr_map):
         urwid.AttrMap.__init__(
             self,
@@ -20,6 +20,7 @@ class Highlight(urwid.AttrMap):
 
 class Selectable(urwid.WidgetWrap):
     """A selectable text widget"""
+
     def __init__(self, text, type, expandable=False, *args, **kwargs):
         self.text = text
         if expandable:
@@ -37,17 +38,18 @@ class Selectable(urwid.WidgetWrap):
 
 class Unselectable(Selectable):
     """A non-selectable text widget"""
+
     def selectable(self):
         return False
 
 
 class Box(urwid.Pile):
     """A box widget for spacing"""
+
     def __init__(self, pixels, row_height=DEFAULT_ROW_HEIGHT, *args, **kwargs):
-        super(Box, self).__init__([
-            urwid.Text("")
-            for i in range(int(pixels / row_height))
-        ])
+        super(Box, self).__init__(
+            [urwid.Text("") for i in range(int(pixels / row_height))]
+        )
 
     def selectable(self):
         return False
@@ -55,6 +57,7 @@ class Box(urwid.Pile):
 
 class SearchOverlay(urwid.Edit):
     """Search overlay widget"""
+
     def __init__(self, gopher, line, on_search=None, on_cancel=None):
         self.line = line
         self.gopher = gopher
@@ -77,6 +80,7 @@ class SearchOverlay(urwid.Edit):
 
 class BookmarkOverlay(urwid.Edit):
     """Bookmark overlay widget"""
+
     def __init__(self, gopher, on_save=None, on_cancel=None):
         self.gopher = gopher
         self.on_save = on_save
@@ -98,15 +102,18 @@ class BookmarkOverlay(urwid.Edit):
 
 class DownloadOverlay(urwid.Edit):
     """Download overlay widget"""
+
     def __init__(self, gopher, location, on_download=None, on_cancel=None):
         self.gopher = gopher
         self.location = location
         self.on_download = on_download
         self.on_cancel = on_cancel
-        self.filename = f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
+        self.filename = (
+            f"{os.path.expanduser('~')}/Downloads/{location.url.rsplit('/')[-1]}"
+        )
         super(DownloadOverlay, self).__init__(
-            caption=" download location: ", edit_text=self.filename,
-            align="left")
+            caption=" download location: ", edit_text=self.filename, align="left"
+        )
 
     def keypress(self, size, key):
         if key in ["enter"]:
@@ -122,12 +129,14 @@ class DownloadOverlay(urwid.Edit):
 
 class ExitOverlay(urwid.Edit):
     """Exit confirmation overlay widget"""
+
     def __init__(self, gopher, on_exit=None, on_cancel=None):
         self.gopher = gopher
         self.on_exit = on_exit
         self.on_cancel = on_cancel
         super(ExitOverlay, self).__init__(
-            caption="press 'q' again to exit", align="center")
+            caption="press 'q' again to exit", align="center"
+        )
 
     def keypress(self, size, key):
         if key == "q":
@@ -140,6 +149,7 @@ class ExitOverlay(urwid.Edit):
 
 class UrlBar(urwid.Columns):
     """URL bar widget"""
+
     def __init__(self, gopher, on_navigate=None, on_focus_change=None):
         self.gopher = gopher
         self.on_navigate = on_navigate
@@ -184,26 +194,29 @@ class UrlBar(urwid.Columns):
 
 class StatusBar(urwid.WidgetWrap):
     """Status bar widget"""
+
     def __init__(self, gopher):
         self.gopher = gopher
         self.attr = urwid.AttrMap(urwid.Text("status", align="right"), "ok")
         super(StatusBar, self).__init__(self.attr)
 
-    def set_status(self, message, level="ok", align="right"):
+    def set_status(self, message: str, level: str = "ok", align: str = "right"):
         """Set status message"""
         # Handle sound preview status if needed
         content_window = self.gopher.content_window
-        if (hasattr(content_window, 'sound_preview_state') and 
-            content_window.sound_preview_state == "PLAYING" and
-            hasattr(content_window, 'sound_preview_filename') and
-            content_window.sound_preview_filename):
-            
+        if (
+            hasattr(content_window, "sound_preview_state")
+            and content_window.sound_preview_state == "PLAYING"
+            and hasattr(content_window, "sound_preview_filename")
+            and content_window.sound_preview_filename
+        ):
             width, _ = os.get_terminal_size()
             sound_preview_message = (
-                f"[playing: {ntpath.basename(content_window.sound_preview_filename)}]")
+                f"[playing: {ntpath.basename(content_window.sound_preview_filename)}]"
+            )
             spacing = width - len(message) - len(sound_preview_message) - 2
             message = f"{sound_preview_message} {' ' * spacing} {message}"
 
         self.attr.base_widget.set_text(message)
         self.attr = urwid.AttrMap(urwid.Text(message, align=align), level)
-        super(StatusBar, self).__init__(self.attr) 
+        super(StatusBar, self).__init__(self.attr)

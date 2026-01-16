@@ -4,6 +4,8 @@ import os
 import platform
 import shutil
 
+from typing import Dict, List, Tuple
+
 # Application settings
 APPLICATION_HANDLER = "xdg-open" if platform.system() == "Linux" else "open"
 DEFAULT_ROW_HEIGHT = 15
@@ -21,7 +23,7 @@ GEMINI_ENABLED = True
 GOPHER_ENABLED = True
 
 # Color scheme for urwid
-COLOR_MAP = [
+COLOR_MAP: List[Tuple[str, str, str]] = [
     # gopher types
     ("inf", f"{',bold' if USE_BOLD_FONT else ''}", "default"),
     ("hex", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", "default"),
@@ -36,10 +38,9 @@ COLOR_MAP = [
     ("snd", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", "default"),
     ("vid", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", "default"),
     ("pdf", f"dark magenta{',bold' if USE_BOLD_FONT else ''}", "default"),
-
     # ui elements
     ("url_label", "light blue", "default"),
-    ("url_bar", f"{',bold' if USE_BOLD_FONT else ''}", "default", "bold"),
+    ("url_bar", f"{',bold' if USE_BOLD_FONT else ''}", "default"),
     ("selection", f"light gray{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
     ("divider", "light blue", "default"),
     ("search_overlay", f"white{',bold' if USE_BOLD_FONT else ''}", "dark blue"),
@@ -48,7 +49,6 @@ COLOR_MAP = [
     ("bookmark_entry", f"white{',bold' if USE_BOLD_FONT else ''}", "black"),
     ("exit_overlay", f"{',bold' if USE_BOLD_FONT else ''}", "dark red"),
     ("list", "default", "default"),
-
     # status bar levels
     ("ok", f"dark green{',bold' if USE_BOLD_FONT else ''}", "default"),
     ("loading", f"brown{',bold' if USE_BOLD_FONT else ''}", "default"),
@@ -57,7 +57,7 @@ COLOR_MAP = [
 ]
 
 # Gopher type mappings
-TYPE_MAP = {
+TYPE_MAP: Dict[str, str] = {
     # canonical types
     "0": "txt",  # text file
     "1": "dir",  # submenu
@@ -86,12 +86,27 @@ TYPE_MAP = {
 }
 
 # File type categories
-SELECTABLES = ["txt", "dir", "gif", "htm", "img", "gif", "ask",
-               "bin", "png", "rtf", "snd", "vid", "pdf", "xml", "hex"]
-BINARIES = ["txt", "hex", "img", "gif", "bin", "png", "rtf", "pdf", "xml"]
+SELECTABLES: List[str] = [
+    "txt",
+    "dir",
+    "gif",
+    "htm",
+    "img",
+    "gif",
+    "ask",
+    "bin",
+    "png",
+    "rtf",
+    "snd",
+    "vid",
+    "pdf",
+    "xml",
+    "hex",
+]
+BINARIES: List[str] = ["txt", "hex", "img", "gif", "bin", "png", "rtf", "pdf", "xml"]
 
 # Landing page content
-LANDING_PAGE = [
+LANDING_PAGE: List[List[str]] = [
     ["iPHERGUSON"],
     ["i"],
     ["iPrototype gopher client with in-terminal image preview"],
@@ -112,4 +127,4 @@ LANDING_PAGE = [
     ["iBack: h, arrow-left, backspace"],
     ["i"],
     ["iBookmarks"],
-] 
+]

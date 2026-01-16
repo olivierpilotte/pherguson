@@ -2,28 +2,28 @@
 
 import datetime
 import hashlib
-import os
 import pathlib
+from typing import List
+
 from ..config.settings import HOME_DIRECTORY
-
-
-class Line:
-    """Represents a single line in a gopher menu"""
-    def __init__(self, type, text, location):
-        self.type = type
-        self.text = text
-        self.location = location
-
-    def __repr__(self):
-        return f"{self.type}\t{self.text}\t{self.location}\n"
 
 
 class Location:
     """Represents a location (host, port, url) for both gopher and gemini protocols"""
-    def __init__(self, host, port, url, focus=0, walkable=True,
-                 bookmarks=False, history=False, protocol="gopher"):
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        url: str,
+        focus: int = 0,
+        walkable: bool = True,
+        bookmarks: bool = False,
+        history: bool = False,
+        protocol: str = "gopher",
+    ):
         self.host = host
-        self.port = int(port) if port else (1965 if protocol == "gemini" else 70)
+        self.port = int(port) if port > 0 else (1965 if protocol == "gemini" else 70)
         self.url = url
         self.focus = focus
         self.walkable = walkable
@@ -37,7 +37,7 @@ class Location:
         else:
             return f"gopher://{self.host}:{self.port}{self.url}"
 
-    def get_link(self, name=None):
+    def get_link(self, name: str = "") -> str:
         """Generate a link string"""
         url = "/" if self.url == "" else self.url
         if self.protocol == "gemini":
@@ -49,44 +49,39 @@ class Location:
             )
 
 
+class Line:
+    """Represents a single line in a gopher menu"""
+
+    def __init__(self, type: str, text: str, location: Location):
+        self.type = type
+        self.text = text
+        self.location: Location = location
+
+    def __repr__(self):
+        return f"{self.type}\t{self.text}\t{self.location}\n"
+
+
 class Error(Exception):
     """Custom exception for gopher protocol errors"""
-    def __init__(self, message):
+
+    def __init__(self, message: str):
         self.message = message
-
-
-class Cache:
-    """Handles caching of downloaded files"""
-    cache_directory = f"{HOME_DIRECTORY}/.cache/pherguson"
-
-    @classmethod
-    def get_cache_directory(cls, host):
-        """Get cache directory for a specific host"""
-        hash = hashlib.md5(host.encode()).hexdigest()[:8]
-        cache_directory = f"{cls.cache_directory}/{hash}"
-        path = pathlib.Path(cache_directory)
-        path.mkdir(parents=True, exist_ok=True)
-        return cache_directory
-
-    @classmethod
-    def file_exists(cls, file_path):
-        """Check if a file exists in cache"""
-        return pathlib.Path(file_path).is_file()
 
 
 class History:
     """Manages navigation history"""
+
     def __init__(self):
-        self.history = []
+        self.history: List[Location] = []
 
     @property
-    def current_location(self):
+    def current_location(self) -> Location:
         """Get the current location from history"""
         if len(self.history) == 1:
             return self.history[0]
         return self.history[-1]
 
-    def forward(self, location):
+    def forward(self, location: Location):
         """Add a new location to history"""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         link = location.get_link(name=f"{timestamp} {str(location)}")
@@ -100,7 +95,7 @@ class History:
 
         self.history.append(location)
 
-    def set_focus(self, focus):
+    def set_focus(self, focus: int):
         """Set focus position for current location"""
         self.current_location.focus = focus
 
@@ -115,4 +110,24 @@ class History:
 
     def show_history(self):
         """Show history page"""
-        self.history.append(Location("", 70, "", history=True)) 
+        self.history.append(Location("", 70, "", history=True))
+
+
+class Cache:
+    """Handles caching of downloaded files"""
+
+    cache_directory = f"{HOME_DIRECTORY}/.cache/pherguson"
+
+    @classmethod
+    def get_cache_directory(cls, host: str) -> str:
+        """Get cache directory for a specific host"""
+        hash = hashlib.md5(host.encode()).hexdigest()[:8]
+        cache_directory = f"{cls.cache_directory}/{hash}"
+        path = pathlib.Path(cache_directory)
+        path.mkdir(parents=True, exist_ok=True)
+        return cache_directory
+
+    @classmethod
+    def file_exists(cls, file_path: str) -> bool:
+        """Check if a file exists in cache"""
+        return pathlib.Path(file_path).is_file()

@@ -1,24 +1,24 @@
 #!/usr/bin/env python
 
-import os
+from typing import Callable, List
 import requests
 import shutil
 import socket
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 from .models import Location, Line, Error, Cache
-from ..config.settings import TYPE_MAP, HOME_DIRECTORY
+from ..config.settings import TYPE_MAP
 from ..utils.helpers import shorten
 
 
 class GopherClient:
     """Handles gopher protocol communication and content parsing"""
-    
-    def __init__(self, status_callback=None):
+
+    def __init__(self, status_callback: Callable[[str, str], None]):
         self.status_callback = status_callback
         self.current_location_map = []
 
-    def _get_socket(self, location):
+    def _get_socket(self, location: Location) -> socket.socket:
         """Create and configure socket for gopher connection"""
         crlf = "\r\n"
 
@@ -39,12 +39,12 @@ class GopherClient:
         except (ConnectionRefusedError, socket.gaierror, OSError):
             raise Error(f"error connecting to {location.host}:{location.port}")
 
-    def get_content(self, location):
+    def get_content(self, location: Location) -> List[List[str]]:
         """Fetch content from a gopher location"""
         sock = self._get_socket(location)
         file = sock.makefile("r")
 
-        lines = []
+        lines: List[List[str]] = []
         while True:
             try:
                 line = file.readline()
@@ -54,15 +54,15 @@ class GopherClient:
                 lines.append([part.strip("\n") for part in line.split("\t")])
 
             except Exception as e:
-                if self.status_callback:
-                    self.status_callback(str(e), level="warning")
+                if self.status_callback is not None:
+                    self.status_callback(str(e), "warning")
 
         sock.close()
         return lines
 
-    def download_http(self, url, file_path=None):
+    def download_http(self, url: str, file_path: str | None = None) -> str:
         """Download a file via HTTP"""
-        parsed_url = urlparse(url)
+        parsed_url: ParseResult = urlparse(url)
         filename = url.split("/")[-1]
 
         if not file_path:
@@ -70,13 +70,13 @@ class GopherClient:
             file_path = f"{download_directory}/{filename}"
 
             if Cache.file_exists(file_path):
-                if self.status_callback:
-                    self.status_callback(f"cached: {shorten(file_path)}")
+                if self.status_callback is not None:
+                    self.status_callback(f"cached: {shorten(file_path)}", "info")
                 return file_path
 
-        if self.status_callback:
-            self.status_callback(f"downloading: {url}", level="loading")
-            
+        if self.status_callback is not None:
+            self.status_callback(f"downloading: {url}", "loading")
+
         response = requests.get(url, stream=True)
 
         if response.status_code == 200:
@@ -87,22 +87,22 @@ class GopherClient:
 
         return file_path
 
-    def download(self, location, file_path=None):
+    def download(self, location: Location, file_path: str | None = None) -> str:
         """Download a file via gopher protocol"""
         filename = location.url.split("/")[-1]
         if not file_path:
             download_directory = Cache.get_cache_directory(location.host)
             file_path = f"{download_directory}/{filename}"
-            
+
             if Cache.file_exists(file_path):
-                if self.status_callback:
-                    self.status_callback(f"cached: {shorten(file_path)}")
+                if self.status_callback is not None:
+                    self.status_callback(f"cached: {shorten(file_path)}", "info")
                 return file_path
 
-        if self.status_callback:
+        if self.status_callback is not None:
             self.status_callback(
-                f"downloading: gopher://{location.host}{location.url}",
-                level="loading")
+                f"downloading: gopher://{location.host}{location.url}", "loading"
+            )
 
         s = self._get_socket(location)
         f = s.makefile("rb")
@@ -113,12 +113,12 @@ class GopherClient:
         s.close()
         return file_path
 
-    def _parse_line(self, line, current_location):
+    def _parse_line(self, line: List[str], current_location: Location) -> Line:
         """Parse a raw gopher line into a Line object"""
         text = line[0] if len(line) > 0 else ""
         url = line[1] if len(line) > 1 else ""
         host = line[2] if len(line) > 2 else ""
-        
+
         try:
             port = int(line[3]) if len(line) > 3 else 70
         except Exception:
@@ -134,22 +134,19 @@ class GopherClient:
 
         return Line(line_type, text, Location(host, port, url))
 
-    def crawl(self, location):
+    def crawl(self, location: Location) -> List[Line]:
         """Fetch and parse content from a gopher location"""
         try:
-            if self.status_callback:
-                self.status_callback(f"{location}", level="loading")
-                
+            self.status_callback(f"{location}", "loading")
+
             content = self.get_content(location)
             lines = [self._parse_line(line, location) for line in content]
             self.current_location_map = lines
 
-            if self.status_callback:
-                self.status_callback(f"{location}")
-                
+            self.status_callback(f"{location}", "info")
+
             return lines
 
         except Error as e:
-            if self.status_callback:
-                self.status_callback(e.message, level="error")
-            raise 
+            self.status_callback(e.message, "error")
+            return []
