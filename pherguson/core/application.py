@@ -241,7 +241,7 @@ class GopherApplication:
 
         self.main_loop.widget = bookmark_overlay
 
-    def show_download_overlay(self, location) -> None:
+    def show_download_overlay(self, location: Location) -> None:
         """Show download overlay"""
         widget = urwid.Filler(
             urwid.AttrMap(
@@ -369,7 +369,7 @@ class GopherApplication:
 
         self.main_loop.widget = self.window
 
-    def _handle_download(self, location, file_path: str) -> None:
+    def _handle_download(self, location: Location, file_path: str) -> None:
         """Handle file download"""
         if "URL" in location.url:
             url = location.url.replace("URL:", "")
@@ -389,7 +389,10 @@ class GopherApplication:
         self.main_loop.widget = self.window
 
     def refresh_screen(
-        self, main_loop, stop_event: threading.Event, message_queue: queue.Queue
+        self,
+        main_loop: urwid.MainLoop,
+        stop_event: threading.Event,
+        message_queue: queue.Queue,
     ) -> None:
         """Refresh screen periodically"""
         while not stop_event.wait(timeout=0.5):
